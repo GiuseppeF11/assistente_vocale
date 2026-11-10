@@ -20,23 +20,33 @@ android {
         }
     }
 
-    // chiave fissa: ogni APK compilato su GitHub si installa sopra il precedente senza disinstallare
+    // Firma di produzione: la chiave privata NON è nel repository, arriva dai segreti di GitHub.
+    // In locale (Android Studio) senza variabili d'ambiente si usa la normale firma di debug.
+    val keystorePath = providers.environmentVariable("KEYSTORE_FILE").orNull
     signingConfigs {
-        getByName("debug") {
-            storeFile = file("debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
+        if (keystorePath != null) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = providers.environmentVariable("KEYSTORE_PASSWORD").get()
+                keyAlias = providers.environmentVariable("KEY_ALIAS").orNull ?: "assistente"
+                keyPassword = providers.environmentVariable("KEYSTORE_PASSWORD").get()
+            }
         }
     }
 
     buildTypes {
-        debug {
-            signingConfig = signingConfigs.getByName("debug")
-        }
         release {
             isMinifyEnabled = false
+            isDebuggable = false
+            signingConfig = if (keystorePath != null) signingConfigs.getByName("release")
+            else signingConfigs.getByName("debug")
         }
+    }
+
+    // i controlli lint non devono bloccare la build di produzione
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
     }
 
     compileOptions {

@@ -21,6 +21,12 @@ consentire «Installa app sconosciute» per l'app; dalla seconda in poi su Andro
 altre conferme). Dopo l'aggiornamento, se l'ascolto a voce era attivo, una notifica invita a riaprire l'app.
 Internet serve solo per questo controllo: il riconoscimento vocale resta sul telefono.
 
+## Firma
+
+L'APK è una build di produzione firmata con una chiave privata che sta solo nei segreti di GitHub
+(`KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`), non nel repository. Senza quei segreti la compilazione si ferma.
+Conservane una copia: con una chiave diversa gli aggiornamenti non si installano sopra la versione esistente.
+
 ## Come funziona
 
 1. Un servizio in primo piano tiene aperto il microfono e aspetta la frase di attivazione
