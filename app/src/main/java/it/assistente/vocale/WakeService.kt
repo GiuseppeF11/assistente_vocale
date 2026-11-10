@@ -1084,13 +1084,21 @@ class WakeService : Service(), AssistantBus.Controller {
         val seq = actionSeq
         Thread({
             val token = SpotifyAccount.accessToken(this)
-            val item = token?.let { runCatching { SpotifyAccount.search(it, req) }.getOrNull() }
+            val result = token?.let { SpotifyAccount.search(it, req) }
             main.post {
                 if (!alive || seq != actionSeq) return@post
-                when {
-                    token == null -> spotifySearchFallback(req, "Non riesco a collegarmi a Spotify (internet o account da ricollegare).")
-                    item == null -> finish("Non ho trovato «${req.query}» su Spotify.", error = true)
-                    else -> playItem(item, req, seq)
+                when (result) {
+                    null -> spotifySearchFallback(req, "Non riesco a collegarmi a Spotify (internet o account da ricollegare).")
+                    SpotifyAccount.Search.Empty -> finish("Non ho trovato «${req.query}» su Spotify.", error = true)
+                    is SpotifyAccount.Search.Error -> {
+                        // messaggio completo a schermo, a voce solo l'essenziale
+                        AssistantBus.post(UiState(Phase.ERROR, result.message, transcript))
+                        speak("Spotify ha rifiutato la ricerca. Guarda il messaggio sullo schermo.")
+                        backToWake()
+                        main.removeCallbacks(hideRunnable)
+                        main.postDelayed(hideRunnable, 9000)
+                    }
+                    is SpotifyAccount.Search.Found -> playItem(result.item, req, seq)
                 }
             }
         }, "assistente-spotify").start()

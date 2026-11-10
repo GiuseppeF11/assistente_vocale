@@ -128,9 +128,44 @@ object SpotifyAccount {
         false
     }
 
+    /** Esito della ricerca: trovato, nessun risultato, oppure errore con la risposta di Spotify. */
+    sealed interface Search {
+        data class Found(val item: SpotifyItem) : Search
+        data object Empty : Search
+        data class Error(val message: String) : Search
+    }
+
     /** Cerca su Spotify e sceglie cosa riprodurre. Fuori dal thread principale. */
-    fun search(token: String, req: PlayRequest): SpotifyItem? {
-        val url = "https://api.spotify.com/v1/search?type=track,artist,album,playlist&limit=5&market=from_token&q=" +
+    fun search(token: String, req: PlayRequest): Search = try {
+        searchOrThrow(token, req)?.let { Search.Found(it) } ?: Search.Empty
+    } catch (e: SpotifyHttpError) {
+        Search.Error(e.message ?: "errore")
+    } catch (e: Exception) {
+        Log.w(TAG, "Ricerca Spotify", e)
+        Search.Error(e.message ?: e.javaClass.simpleName)
+    }
+
+    private class SpotifyHttpError(msg: String) : Exception(msg)
+
+    /** Traduce in italiano gli errori più comuni della modalità sviluppo di Spotify. */
+    private fun explain(code: Int, body: String): String {
+        val msg = runCatching { JSONObject(body).optJSONObject("error")?.optString("message") }.getOrNull()
+            .orEmpty().ifEmpty { body.take(160) }
+        val hint = when {
+            msg.contains("registered", true) || msg.contains("User Management", true) ->
+                "Aggiungi la tua email Spotify nella dashboard → la tua app → User Management."
+            msg.contains("premium", true) -> "In modalità sviluppo il proprietario dell'app deve avere Premium."
+            code == 401 -> "Token scaduto o revocato: ricollega Spotify."
+            code == 429 -> "Troppe richieste, riprova tra poco."
+            else -> ""
+        }
+        return "Spotify ha risposto $code: $msg" + if (hint.isNotEmpty()) ". $hint" else ""
+    }
+
+    private fun searchOrThrow(token: String, req: PlayRequest): SpotifyItem? {
+        // limite massimo in modalità sviluppo: 10 risultati per ricerca
+        val country = java.util.Locale.getDefault().country.takeIf { it.length == 2 } ?: "IT"
+        val url = "https://api.spotify.com/v1/search?type=track,artist,album,playlist&limit=5&market=$country&q=" +
             URLEncoder.encode(req.query, "UTF-8")
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 8000
@@ -138,9 +173,11 @@ object SpotifyAccount {
             setRequestProperty("Authorization", "Bearer $token")
         }
         try {
-            if (conn.responseCode != 200) {
-                Log.w(TAG, "Ricerca Spotify: ${conn.responseCode}")
-                return null
+            val code = conn.responseCode
+            if (code != 200) {
+                val body = conn.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+                Log.w(TAG, "Ricerca Spotify: $code $body")
+                throw SpotifyHttpError(explain(code, body))
             }
             val o = JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
             fun items(key: String, kind: SpotifyItem.Kind): List<SpotifyItem> {
