@@ -34,7 +34,7 @@ import it.assistente.vocale.logic.Text
 enum class SectionKey(val icon: String, val title: String) {
     ACTIVATION("🎙️", "Attivazione"),
     RECOGNITION("🧠", "Riconoscimento"),
-    VOICE("🔊", "Voce e suoni"),
+    VOICE("🔊", "Voce, suoni e aspetto"),
     CALLS("📞", "Chiamate"),
     SPOTIFY("🎵", "Spotify"),
     CALENDAR("📅", "Calendario"),
@@ -361,6 +361,7 @@ class VoiceSection(a: SectionActivity) : Section(a) {
     private var engines: List<TextToSpeech.EngineInfo> = emptyList()
     private var voices: List<Voice> = emptyList()
     private val feedback by lazy { Feedback(a) }
+    private val glowPreview by lazy { EdgeGlow(a) }
     private val pickSound = 7
 
     override fun build(f: Form) {
@@ -386,6 +387,20 @@ class VoiceSection(a: SectionActivity) : Section(a) {
         vibrate = f.switchRow(s, "Vibrazione", "Una breve vibrazione quando inizia ad ascoltare", Prefs.feedbackVibrate(a)) { saveFeedback() }.second
         f.button(s, "▶  Prova il segnale") { feedback.play() }
         f.note("Il volume è relativo a quello multimediale del telefono.")
+
+        f.header("Aspetto del popup")
+        val look = f.card()
+        val glows = Prefs.Glow.values().toList()
+        f.spinnerRow(look, "Contorno luminoso dello schermo", glows.map { it.label }, glows.indexOf(Prefs.glow(a)),
+            "Si accende quando chiami l'assistente e segue la tua voce") { i ->
+            Prefs.setGlow(a, glows[i])
+            if (glows[i] != Prefs.Glow.OFF) glowPreview.preview(glows[i])
+        }
+        f.button(look, "▶  Anteprima del contorno") { glowPreview.preview(Prefs.glow(a).takeIf { it != Prefs.Glow.OFF } ?: Prefs.Glow.STATUS) }
+        f.switchRow(look, "Sfondo sfocato", "Sfoca l'app dietro il popup (Android 12+; altrimenti la scurisce appena)",
+            Prefs.blur(a)) { Prefs.setBlur(a, it) }
+        f.note("«Colore dello stato»: blu mentre ascolta, arancione quando chiede, verde quando esegue, rosso se c'è un errore. " +
+            "Il contorno richiede il permesso «Mostra sopra altre app».")
 
         startPreview(Prefs.ttsEngine(a))
     }
@@ -493,6 +508,7 @@ class VoiceSection(a: SectionActivity) : Section(a) {
     override fun destroy() {
         preview?.shutdown()
         feedback.release()
+        glowPreview.hide()
     }
 }
 

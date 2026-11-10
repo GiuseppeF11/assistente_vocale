@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.KeyguardManager
 import android.content.Intent
 import android.os.Bundle
+import android.view.View
 import android.view.WindowManager
 import it.assistente.vocale.AssistantBus.Phase
 
@@ -22,7 +23,9 @@ class AssistantActivity : Activity() {
         setShowWhenLocked(true)
         setTurnScreenOn(true)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        window.attributes = window.attributes.apply { applyBackdrop(this@AssistantActivity) }
         setContentView(R.layout.activity_assistant)
+        findViewById<View>(R.id.edge_glow).visibility = if (Prefs.glow(this) == Prefs.Glow.OFF) View.GONE else View.VISIBLE
         card = AssistantCard(findViewById(R.id.card), this, layoutInflater)
         // tocco fuori dal popup = annulla
         findViewById<android.view.View>(R.id.backdrop).setOnClickListener { cancel() }

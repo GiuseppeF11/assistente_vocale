@@ -44,6 +44,8 @@ class AssistSession(private val service: AssistSessionService) : VoiceInteractio
         val themed = ContextThemeWrapper(context, R.style.Theme_Assistente)
         val inflater = LayoutInflater.from(themed)
         val v = inflater.inflate(R.layout.activity_assistant, null)
+        v.findViewById<View>(R.id.edge_glow).visibility = if (Prefs.glow(context) == Prefs.Glow.OFF) View.GONE else View.VISIBLE
+        window?.window?.let { w -> w.attributes = w.attributes.apply { applyBackdrop(context) } }
         card = AssistantCard(v.findViewById(R.id.card), themed, inflater)
         v.findViewById<View>(R.id.backdrop).setOnClickListener { cancelDialog() }
         return v

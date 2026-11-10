@@ -65,6 +65,13 @@ object Prefs {
         .putString("fb_sound", sound.name).putString("fb_uri", uri)
         .putInt("fb_volume", volume).putBoolean("fb_vibrate", vibrate).apply()
 
+    // aspetto del popup
+    enum class Glow(val label: String) { OFF("Spento"), BLUE("Blu"), RAINBOW("Arcobaleno"), STATUS("Colore dello stato") }
+    fun glow(c: Context): Glow = runCatching { Glow.valueOf(sp(c).getString("glow", "STATUS")!!) }.getOrDefault(Glow.STATUS)
+    fun setGlow(c: Context, v: Glow) = sp(c).edit().putString("glow", v.name).apply()
+    fun blur(c: Context) = sp(c).getBoolean("blur", true)
+    fun setBlur(c: Context, v: Boolean) = sp(c).edit().putBoolean("blur", v).apply()
+
     // risparmio energetico
     enum class Vad(val label: String, val sensitivity: it.assistente.vocale.logic.VoiceDetector.Sensitivity?) {
         OFF("Disattivato: riconoscitore sempre acceso", null),

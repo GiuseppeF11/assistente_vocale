@@ -217,6 +217,7 @@ class MainActivity : Activity() {
         rows[SectionKey.RECOGNITION]?.set(if (Prefs.systemAsr(this)) "Riconoscimento del telefono" else "Solo Vosk")
         rows[SectionKey.VOICE]?.set(
             (if (Prefs.ttsVoice(this) == null) "Voce automatica" else "Voce scelta") + " · " +
+                "contorno ${Prefs.glow(this).label.lowercase()} · " +
                 (if (Prefs.feedbackSound(this) == Feedback.Sound.NONE) "senza segnale" else "${Prefs.feedbackSound(this).label.removeSuffix("…")}, ${Prefs.feedbackVolume(this)}%") +
                 (if (Prefs.feedbackVibrate(this)) " · vibrazione" else "")
         )

@@ -1,18 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- A telefono bloccato: lo stesso popup in basso, sopra il blocco schermo leggermente scurito -->
+<!-- A telefono bloccato (e con il tasto/gesto): lo stesso popup, sopra uno sfondo scurito o sfocato -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/backdrop"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#66000000"
-    android:fitsSystemWindows="true">
+    android:background="#55000000">
 
-    <include
-        layout="@layout/assistant_card"
+    <!-- contorno luminoso dello schermo (non intercetta i tocchi) -->
+    <it.assistente.vocale.EdgeGlowView
+        android:id="@+id/edge_glow"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom"
-        android:layout_marginStart="12dp"
-        android:layout_marginEnd="12dp"
-        android:layout_marginBottom="32dp" />
+        android:layout_height="match_parent" />
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:clipToPadding="false"
+        android:fitsSystemWindows="true">
+
+        <include
+            layout="@layout/assistant_card"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_gravity="bottom"
+            android:layout_marginStart="14dp"
+            android:layout_marginEnd="14dp"
+            android:layout_marginBottom="32dp" />
+    </FrameLayout>
 </FrameLayout>

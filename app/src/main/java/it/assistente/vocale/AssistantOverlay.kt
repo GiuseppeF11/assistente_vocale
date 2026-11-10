@@ -38,15 +38,19 @@ class AssistantOverlay(private val context: Context) {
         ).apply {
             gravity = Gravity.BOTTOM
             windowAnimations = android.R.style.Animation_InputMethod
+            applyBackdrop(context)
         }
+        // il contorno luminoso va sotto il popup: si aggiunge prima
+        glow.show()
         try {
             wm.addView(v, lp)
         } catch (e: Exception) {
             Log.w(TAG, "Popup non mostrato", e)
+            glow.hide()
             return false
         }
         view = v
-        card = AssistantCard(v, themed, inflater)
+        card = AssistantCard(v.findViewById(R.id.card), themed, inflater)
         AssistantBus.addListener(listener)
         update()
         return true
@@ -58,7 +62,10 @@ class AssistantOverlay(private val context: Context) {
         card?.render(s)
     }
 
+    private val glow = EdgeGlow(context)
+
     fun remove() {
+        glow.hide()
         AssistantBus.removeListener(listener)
         card?.release()
         card = null

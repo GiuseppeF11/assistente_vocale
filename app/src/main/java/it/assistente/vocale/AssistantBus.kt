@@ -53,6 +53,9 @@ object AssistantBus {
     @Volatile var ttsStatus: String = ""
         private set
 
+    /** volume della voce mentre ascolta, 0..1 (lo leggono le animazioni, senza notifiche) */
+    @Volatile var level: Float = 0f
+
     /** stato dell'aggiornamento dell'app */
     @Volatile var updateStatus: String = ""
         private set

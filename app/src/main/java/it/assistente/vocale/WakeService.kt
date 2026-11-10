@@ -592,6 +592,7 @@ class WakeService : Service(), AssistantBus.Controller {
                 }
 
                 Mode.COMMAND -> {
+                    AssistantBus.level = levelOf(buf, n)
                     val elapsed = now - listenStart
                     if (cmd.acceptWaveForm(buf, n)) {
                         // Vosk ha sentito la pausa di fine frase
@@ -621,6 +622,14 @@ class WakeService : Service(), AssistantBus.Controller {
                 }
             }
         }
+    }
+
+    /** Volume del blocco audio, 0..1 (circa 40 dB = silenzio, 75 dB = voce forte). */
+    private fun levelOf(buf: ShortArray, n: Int): Float {
+        var sum = 0.0
+        for (i in 0 until n) { val v = buf[i].toDouble(); sum += v * v }
+        val db = 10 * kotlin.math.log10(sum / n.coerceAtLeast(1) + 1.0)
+        return ((db - 40) / 35).toFloat().coerceIn(0f, 1f)
     }
 
     /** Riascolta l'audio recente in dettatura libera e restituisce le ipotesi. */
@@ -717,7 +726,10 @@ class WakeService : Service(), AssistantBus.Controller {
         sr.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
             override fun onBeginningOfSpeech() {}
-            override fun onRmsChanged(rmsdB: Float) {}
+            override fun onRmsChanged(rmsdB: Float) {
+                // Google riporta circa -2..10 dB: diventa 0..1 per le onde e il contorno
+                AssistantBus.level = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+            }
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -1312,6 +1324,7 @@ class WakeService : Service(), AssistantBus.Controller {
     }
 
     private fun hide() {
+        AssistantBus.level = 0f
         releaseAudioFocus()
         actionSeq++
         main.removeCallbacks(hideRunnable)

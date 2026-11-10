@@ -178,6 +178,15 @@ e la riga «Sento» dell'app mostra «… → non è «ok alfio», ignoro».
 - **Voce**: se manca la voce italiana l'assistente resta muto (meglio che parlare con pronuncia
   inglese): «Installa / aggiorna la voce italiana».
 
+## Aspetto del popup
+
+Scheda con ombra del colore della fase e bordo animato (il colore scorre lungo il bordo mentre ascolta),
+onde che seguono il volume della voce, testo che compare in dissolvenza parola per parola, sfondo sfocato
+dietro (Android 12+, altrimenti leggero oscuramento). Contorno luminoso dello schermo disegnato dall'app
+(l'Edge Lighting di Samsung non è comandabile dalle app): segue gli angoli arrotondati del telefono, respira
+mentre ascolta e si intensifica con la voce. Stili: spento, blu, arcobaleno, colore dello stato; anteprima
+nelle impostazioni (Voce, suoni e aspetto).
+
 ## Interfaccia
 
 Schermata principale con lo stato (attivo / in pausa / spento, riga «Sento», avvia/ferma), gli avvisi solo
