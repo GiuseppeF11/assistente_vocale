@@ -65,6 +65,10 @@ object Prefs {
         .putString("fb_sound", sound.name).putString("fb_uri", uri)
         .putInt("fb_volume", volume).putBoolean("fb_vibrate", vibrate).apply()
 
+    // calendario in cui scrivere gli eventi (-1 = principale)
+    fun calendarId(c: Context): Long = sp(c).getLong("calendar", -1)
+    fun setCalendarId(c: Context, id: Long) = sp(c).edit().putLong("calendar", id).apply()
+
     // modalità auto
     enum class Car(val label: String) { AUTO("Automatica (quando è collegato Android Auto)"), ALWAYS("Sempre attiva"), NEVER("Disattivata") }
     fun carMode(c: Context): Car = runCatching { Car.valueOf(sp(c).getString("car", "AUTO")!!) }.getOrDefault(Car.AUTO)

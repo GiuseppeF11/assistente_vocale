@@ -76,6 +76,8 @@ class MainActivity : Activity() {
             add(Manifest.permission.RECORD_AUDIO)
             add(Manifest.permission.READ_CONTACTS)
             add(Manifest.permission.CALL_PHONE)
+            add(Manifest.permission.READ_CALENDAR)
+            add(Manifest.permission.WRITE_CALENDAR)
             if (Build.VERSION.SDK_INT >= 33) add(Manifest.permission.POST_NOTIFICATIONS)
         }.toTypedArray()
 
@@ -169,6 +171,7 @@ class MainActivity : Activity() {
         }
         checkItalianOffline()
         checkUpdates()
+        bindCalendars()
         refresh()
     }
 
@@ -211,6 +214,8 @@ class MainActivity : Activity() {
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        calendarsShown = null
+        bindCalendars()
         refresh()
     }
 
@@ -258,6 +263,31 @@ class MainActivity : Activity() {
     private fun isAssistant(): Boolean = try {
         getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_ASSISTANT)
     } catch (e: Exception) { false }
+
+    // ---- calendario ----
+
+    private var calendarsShown: List<Long>? = null
+
+    private fun bindCalendars() {
+        val cals = CalendarStore.writable(this)
+        val info = findViewById<TextView>(R.id.calendar_info)
+        val spinner = findViewById<Spinner>(R.id.calendar)
+        if (cals.isEmpty()) {
+            spinner.visibility = View.GONE
+            info.text = if (CalendarStore.hasPermission(this)) "Nessun calendario in cui scrivere."
+            else "Concedi il permesso del calendario (pulsante «Concedi» più in alto)."
+            calendarsShown = null
+            return
+        }
+        spinner.visibility = View.VISIBLE
+        info.text = "Prova: «aggiungi al calendario cena con Marco domani alle 20». " +
+            "Gli eventi con orario hanno un promemoria ${CalendarStore.REMINDER_MINUTES} minuti prima."
+        val ids = cals.map { it.id }
+        if (ids == calendarsShown) return
+        calendarsShown = ids
+        val selected = CalendarStore.target(this)?.let { t -> cals.indexOfFirst { it.id == t.id } } ?: 0
+        bindSpinner(spinner, cals.map { it.label }, selected.coerceAtLeast(0)) { i -> Prefs.setCalendarId(this, cals[i].id) }
+    }
 
     // ---- in auto ----
 
@@ -543,6 +573,7 @@ class MainActivity : Activity() {
             line(granted(Manifest.permission.RECORD_AUDIO), "Microfono"),
             line(granted(Manifest.permission.READ_CONTACTS), "Rubrica"),
             line(granted(Manifest.permission.CALL_PHONE), "Chiamate"),
+            line(CalendarStore.hasPermission(this), "Calendario"),
             line(Build.VERSION.SDK_INT < 33 || granted(Manifest.permission.POST_NOTIFICATIONS), "Notifiche"),
             line(Settings.canDrawOverlays(this), "Mostra sopra altre app (serve a schermo bloccato)"),
             line(battery, "Nessun risparmio batteria sull'app"),

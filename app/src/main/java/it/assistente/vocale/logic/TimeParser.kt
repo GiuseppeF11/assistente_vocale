@@ -18,53 +18,65 @@ object TimeParser {
     /** "alle sette e mezza di sera" -> 19:30; null se non c'è un orario. */
     fun clock(text: String): Clock? {
         val t = Text.tokens(text)
-        var h: Int
-        var m = 0
-        var i: Int
-        when {
-            "mezzogiorno" in t -> { h = 12; i = t.indexOf("mezzogiorno") }
-            "mezzanotte" in t -> { h = 0; i = t.indexOf("mezzanotte") }
-            else -> {
-                // "metti una sveglia": "una" è l'articolo solo se non segue "all"/"l"
-                i = t.indices.firstOrNull { k ->
-                    val n = num(t[k])
-                    n != null && n in 0..24 && (t[k] !in setOf("un", "uno", "una") || t.getOrNull(k - 1) in setOf("all", "l", "alle", "le"))
-                } ?: return null
-                h = num(t[i])!!
-            }
+        val i = when {
+            "mezzogiorno" in t -> t.indexOf("mezzogiorno")
+            "mezzanotte" in t -> t.indexOf("mezzanotte")
+            // "metti una sveglia": "una" è l'articolo solo se non segue "all"/"l"
+            else -> t.indices.firstOrNull { k ->
+                val n = num(t[k])
+                n != null && n in 0..24 && (t[k] !in setOf("un", "uno", "una") || t.getOrNull(k - 1) in setOf("all", "l", "alle", "le"))
+            } ?: return null
         }
+        var (c, _) = clockAt(t, i) ?: return null
+        if (t.any { it in evening }) c = evening(c, night = t.any { it == "notte" || it == "stanotte" })
+        return c
+    }
+
+    /** Pomeriggio/sera: 7 -> 19; di notte solo dalle 8 in poi (le 2 di notte restano 2). */
+    fun evening(c: Clock, night: Boolean): Clock =
+        if (c.hour in 1..11 && (!night || c.hour >= 8)) Clock(c.hour + 12, c.minute) else c
+
+    /**
+     * Orario che inizia al token [i] (l'ora, oppure "mezzogiorno"/"mezzanotte").
+     * Restituisce l'orario (senza correzione mattina/sera) e l'indice del primo token dopo l'orario.
+     */
+    fun clockAt(t: List<String>, i: Int): Pair<Clock, Int>? {
+        var h = when (t.getOrNull(i)) {
+            "mezzogiorno" -> 12
+            "mezzanotte" -> 0
+            else -> num(t.getOrNull(i))?.takeIf { it in 0..24 } ?: return null
+        }
+        var m = 0
         var j = i + 1
         when {
             t.getOrNull(j) == "e" -> {
-                j++
                 when {
-                    t.getOrNull(j) in setOf("mezza", "mezzo") -> m = 30
-                    t.getOrNull(j) == "un" && t.getOrNull(j + 1) == "quarto" -> m = 15
-                    t.getOrNull(j) == "tre" && t.getOrNull(j + 1) == "quarti" -> m = 45
-                    num(t.getOrNull(j)) != null -> { m = num(t[j])!!; j++ }
+                    t.getOrNull(j + 1) in setOf("mezza", "mezzo") -> { m = 30; j += 2 }
+                    t.getOrNull(j + 1) == "un" && t.getOrNull(j + 2) == "quarto" -> { m = 15; j += 3 }
+                    t.getOrNull(j + 1) == "tre" && t.getOrNull(j + 2) == "quarti" -> { m = 45; j += 3 }
+                    num(t.getOrNull(j + 1))?.let { it in 0..59 } == true -> { m = num(t[j + 1])!!; j += 2 }
                 }
             }
             t.getOrNull(j) == "meno" -> {
-                j++
                 val back = when {
-                    t.getOrNull(j) == "un" && t.getOrNull(j + 1) == "quarto" -> 15
-                    else -> num(t.getOrNull(j)) ?: 0
+                    t.getOrNull(j + 1) == "un" && t.getOrNull(j + 2) == "quarto" -> 15.also { j += 3 }
+                    num(t.getOrNull(j + 1)) != null -> num(t[j + 1])!!.also { j += 2 }
+                    else -> 0
                 }
                 if (back in 1..59) { h = (h + 23) % 24; m = 60 - back }
             }
-            num(t.getOrNull(j))?.let { it in 0..59 } == true -> { m = num(t[j])!!; j++ }
+            num(t.getOrNull(j))?.let { it in 0..59 } == true && t.getOrNull(j) !in setOf("un", "una", "uno") -> {
+                m = num(t[j])!!; j++
+            }
         }
         // "quaranta cinque" detto staccato
         val unit = num(t.getOrNull(j))
-        if (m >= 20 && m % 10 == 0 && unit != null && unit in 1..9 && t.getOrNull(j) !in setOf("un", "una", "uno")) m += unit
-
-        if (t.any { it in evening }) {
-            val night = t.any { it == "notte" || it == "stanotte" }
-            if (h in 1..11 && (!night || h >= 8)) h += 12
+        if (m >= 20 && m % 10 == 0 && unit != null && unit in 1..9 && t.getOrNull(j) !in setOf("un", "una", "uno")) {
+            m += unit; j++
         }
         if (h == 24) h = 0
         if (h !in 0..23 || m !in 0..59) return null
-        return Clock(h, m)
+        return Clock(h, m) to j
     }
 
     /** "un'ora e mezza" -> 5400 s; "5" -> 300 s (minuti); null se non c'è una durata. */

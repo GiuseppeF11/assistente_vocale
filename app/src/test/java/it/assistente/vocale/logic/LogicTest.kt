@@ -142,6 +142,59 @@ class LogicTest {
         assertEquals("Albachiara di Vasco Rossi", tracks[0].spoken())
     }
 
+    @Test fun calendario() {
+        // martedì 10 novembre 2026
+        val oggi = java.time.LocalDate.of(2026, 11, 10)
+        fun ev(t: String) = CalendarParser.parse(t, oggi)
+        fun d(m: Int, g: Int, y: Int = 2026) = java.time.LocalDate.of(y, m, g)
+        fun c(h: Int, m: Int = 0) = TimeParser.Clock(h, m)
+
+        assertEquals(CalendarParser.EventSpec("Cena con Marco", d(11, 11), c(17)),
+            ev("Aggiungi al calendario Cena con Marco per domani alle 17:00"))
+        assertEquals(CalendarParser.EventSpec("Dentista", d(11, 11), c(17)),
+            ev("aggiungi al calendario dentista domani alle 5 del pomeriggio"))
+        assertEquals(CalendarParser.EventSpec("Riunione", d(11, 16), c(10, 30)),
+            ev("crea un evento riunione lunedì alle 10 e mezza"))
+        assertEquals(CalendarParser.EventSpec("Compleanno di Marco", d(11, 15), null),
+            ev("segna in agenda il compleanno di Marco il 15 novembre"))
+        assertEquals(CalendarParser.EventSpec("Visita medica", d(1, 3, 2027), c(9)),
+            ev("aggiungi al calendario il 3 gennaio alle 9 visita medica"))
+        assertEquals(CalendarParser.EventSpec("Palestra", d(11, 10), c(19)),
+            ev("aggiungi al calendario palestra stasera alle 7"))
+        assertEquals(CalendarParser.EventSpec("Partita di calcetto", d(11, 13), c(19), c(20, 30)),
+            ev("aggiungi al calendario partita di calcetto venerdì dalle 19 alle 20 e 30"))
+        assertEquals(CalendarParser.EventSpec("Chiamare l'idraulico", d(11, 13), null),
+            ev("ricordami di chiamare l'idraulico tra 3 giorni"))
+        assertEquals(CalendarParser.EventSpec("Aperitivo", null, c(19)),
+            ev("aggiungi al calendario aperitivo alle 19"))
+        assertEquals(CalendarParser.EventSpec("Riunione", d(11, 20), c(15)),
+            ev("aggiungi al calendario riunione il 20 alle 15"))
+        assertEquals(CalendarParser.EventSpec("Pranzo con mamma", d(11, 15), c(13)),
+            ev("aggiungi al calendario pranzo con mamma il 15/11 all'una"))
+        assertEquals(CalendarParser.EventSpec("Dentista", d(11, 16), c(9)),
+            ev("aggiungi un appuntamento dal dentista lunedì prossimo alle 9 di mattina"))
+        assertEquals(CalendarParser.EventSpec("Pranzo da Anna", d(11, 12), c(12, 30)),
+            ev("Aggiungi pranzo da Anna al calendario giovedì alle 12:30"))
+        assertEquals(CalendarParser.EventSpec("", d(11, 11), c(17)),
+            ev("aggiungi al calendario domani alle 17"))
+        assertEquals(CalendarParser.EventSpec("Dentista", null, null), ev("aggiungi al calendario dentista"))
+        assertEquals("domani", CalendarParser.describe(d(11, 11), oggi))
+        assertEquals("lunedì 16 novembre", CalendarParser.describe(d(11, 16), oggi))
+        assertEquals("domenica 3 gennaio 2027", CalendarParser.describe(d(1, 3, 2027), oggi))
+    }
+
+    @Test fun comandoCalendario() {
+        assertEquals(Command.AddEvent, CommandParser.parse("Aggiungi al calendario Cena con Marco per domani alle 17:00"))
+        assertEquals(Command.AddEvent, CommandParser.parse("metti in agenda riunione lunedì"))
+        assertEquals(Command.AddEvent, CommandParser.parse("crea un evento dentista"))
+        assertEquals(Command.AddEvent, CommandParser.parse("aggiungi un appuntamento domani"))
+        assertEquals(Command.AddEvent, CommandParser.parse("ricordami di chiamare Marco domani alle 5"))
+        assertEquals(Command.Timer(600), CommandParser.parse("ricordami tra 10 minuti"))
+        // non devono diventare eventi
+        assertEquals(Command.Alarm(7, 0), CommandParser.parse("metti la sveglia alle 7"))
+        assertEquals(Command.Play(PlayRequest("vasco rossi", MediaFocus.ANY)), CommandParser.parse("metti vasco rossi"))
+    }
+
     @Test fun navigazione() {
         assertEquals(Command.Navigate("catania"), CommandParser.parse("portami a catania"))
         assertEquals(Command.Navigate("via etnea 120 catania"), CommandParser.parse("naviga verso via etnea cento venti catania"))

@@ -19,6 +19,8 @@ sealed interface Command {
     /** "metti una sveglia" senza orario */
     data object AlarmWhen : Command
     data class Timer(val seconds: Int) : Command
+    /** evento in calendario: titolo, data e ora li estrae CalendarParser dalla frase originale */
+    data object AddEvent : Command
     /** "metti un timer" senza durata */
     data object TimerHowLong : Command
 
@@ -58,9 +60,15 @@ object CommandParser {
     )
     private val timerRe = Regex(
         "^$FILLERS(?:(?:metti(?:mi)?|imposta|avvia|fai partire|crea|aggiungi|fammi)(?: un| il)? " +
-            "(?:timer|conto alla rovescia)|timer|conto alla rovescia|avvisami|ricordami)(?:\\s+(.*))?$"
+            "(?:timer|conto alla rovescia)|timer|conto alla rovescia)(?:\\s+(.*))?$"
     )
     private val relative = Regex("^(?:tra|fra)\\s+")
+    /** "ricordami tra 10 minuti" = timer; "ricordami di … domani" = evento */
+    private val remindRe = Regex("^$FILLERS(?:avvisami|ricordami|ricordamelo|ricordati di avvisarmi)(?:\\s+(.*))?$")
+    private val calendarRe = Regex(
+        "^$FILLERS(?:aggiungi|aggiungimi|metti|mettimi|segna|segnami|inserisci|crea|salva|fissa|fissami|programma|nuovo|nuova)\\b" +
+            ".*\\b(?:calendario|agenda|evento|appuntamento|impegno)\\b"
+    )
 
     private val playRe = Regex(
         "^$FILLERS(?:(?:su |da |apri )?spotify\\s+)?(?:metti(?:mi)?|fammi (?:sentire|ascoltare)|riproduci|suona|" +
@@ -121,6 +129,12 @@ object CommandParser {
             val c = TimeParser.clock(rest) ?: return Command.AlarmWhen
             return Command.Alarm(c.hour, c.minute)
         }
+        remindRe.find(text)?.let { m ->
+            val rest = m.groupValues[1]
+            if (relative.containsMatchIn(rest)) return TimeParser.duration(rest)?.let { Command.Timer(it) } ?: Command.TimerHowLong
+            return Command.AddEvent
+        }
+        if (calendarRe.containsMatchIn(text)) return Command.AddEvent
         timerRe.find(text)?.let { m ->
             val d = TimeParser.duration(m.groupValues[1]) ?: return Command.TimerHowLong
             return Command.Timer(d)

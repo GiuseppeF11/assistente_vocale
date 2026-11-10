@@ -57,6 +57,10 @@ Conservane una copia: con una chiave diversa gli aggiornamenti non si installano
 | «svegliami tra 20 minuti» | sveglia all'orario calcolato |
 | «timer di 5 minuti» / «di un'ora e mezza» / «avvisami tra 10 minuti» | timer nell'app Orologio |
 | «metti una sveglia» / «metti un timer» | «A che ora?» / «Per quanto tempo?» |
+| «aggiungi al calendario Cena con Marco per domani alle 17» | evento nel calendario del telefono |
+| «crea un evento riunione lunedì dalle 10 alle 11 e mezza» | evento con inizio e fine |
+| «segna in agenda il compleanno di Marco il 15 novembre» | evento di tutto il giorno |
+| «ricordami di chiamare l'idraulico tra 3 giorni» | evento (con «tra 10 minuti» è un timer) |
 | «annulla», «lascia stare» | chiude |
 
 Alle domande si risponde a voce («Rossi», «il secondo», «cellulare») oppure toccando l'opzione.
@@ -118,6 +122,15 @@ App registrata su developer.spotify.com con Redirect URI `assistente-vocale://ca
 
 Niente accesso alle notifiche: con quel permesso Play Protect blocca l'installazione degli APK scaricati
 dal browser. Lo stesso vale per lettura SMS e servizi di accessibilità: l'app non deve mai chiederli.
+
+## Calendario
+
+Gli eventi si scrivono direttamente nel calendario scelto nelle impostazioni (di default il principale
+dell'account Google), senza aprire app. Titolo, giorno e ora si ricavano dalla frase: oggi, domani,
+dopodomani, giorni della settimana, «il 15 novembre», «il 20», «15/11», «tra 3 giorni»; orari come per le
+sveglie, anche «dalle … alle …». Senza ora è un evento di tutto il giorno; con l'ora sola è oggi (o domani se
+l'ora è passata). «All'una» o «alle 5» senza altre indicazioni sono del pomeriggio. Promemoria 30 minuti prima.
+Se manca il titolo o il quando, l'assistente lo chiede.
 
 ## In auto (Android Auto)
 

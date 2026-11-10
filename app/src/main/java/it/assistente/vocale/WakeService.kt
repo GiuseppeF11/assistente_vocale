@@ -32,6 +32,7 @@ import android.speech.tts.Voice
 import android.util.Log
 import it.assistente.vocale.AssistantBus.Phase
 import it.assistente.vocale.AssistantBus.UiState
+import it.assistente.vocale.logic.CalendarParser
 import it.assistente.vocale.logic.ChoiceParser
 import it.assistente.vocale.logic.Command
 import it.assistente.vocale.logic.CommandParser
@@ -120,6 +121,10 @@ class WakeService : Service(), AssistantBus.Controller {
         data object WhatToPlay : Pending
         data object AlarmWhen : Pending
         data object TimerHowLong : Pending
+        /** evento senza titolo: si chiede come chiamarlo */
+        data class EventTitle(val spec: CalendarParser.EventSpec) : Pending
+        /** evento senza data né ora: si chiede quando */
+        data class EventWhen(val title: String) : Pending
         /** in auto: conferma a voce prima di chiamare o navigare */
         class Confirm(val action: () -> Unit) : Pending
         data class PickContact(val candidates: List<Contact>, val kind: NumberKind?) : Pending
@@ -733,7 +738,7 @@ class WakeService : Service(), AssistantBus.Controller {
     private fun biasingStrings(): ArrayList<String> {
         val list = arrayListOf(
             "chiama", "telefona", "portami", "naviga", "vivavoce", "cellulare", "casa", "lavoro", "annulla",
-            "metti", "spotify", "album", "playlist", "sveglia", "svegliami", "timer",
+            "metti", "spotify", "album", "playlist", "sveglia", "svegliami", "timer", "calendario", "agenda",
         )
         contacts.asSequence().map { it.name }.take(150).forEach { list.add(it) }
         return list
@@ -811,6 +816,7 @@ class WakeService : Service(), AssistantBus.Controller {
                 Command.AlarmWhen -> ask("A che ora?", Pending.AlarmWhen)
                 is Command.Timer -> timer(cmd.seconds)
                 Command.TimerHowLong -> ask("Per quanto tempo?", Pending.TimerHowLong)
+                Command.AddEvent -> addEvent(CalendarParser.parse(text, java.time.LocalDate.now()))
                 else -> ask(
                     "Non ho capito. Puoi chiamare, farti portare in un posto, mettere musica, una sveglia o un timer.",
                     Pending.Fresh, misunderstood = true,
@@ -830,6 +836,18 @@ class WakeService : Service(), AssistantBus.Controller {
                 is Command.Navigate -> navigate(cmd.destination)
                 is Command.Call -> resolveCall(cmd.target, cmd.kind)
                 else -> navigate(CommandParser.destination(text))
+            }
+
+            is Pending.EventTitle -> {
+                val title = text.trim().trim('"', '«', '»', '.', '!', '?').replaceFirstChar { it.uppercase() }
+                if (title.isEmpty()) ask("Come si chiama l'evento?", p, misunderstood = true)
+                else addEvent(p.spec.copy(title = title))
+            }
+
+            is Pending.EventWhen -> {
+                val s = CalendarParser.parse(text, java.time.LocalDate.now())
+                if (s.date == null && s.time == null) ask("Non ho capito. Quando?", p, misunderstood = true)
+                else addEvent(s.copy(title = p.title))
             }
 
             Pending.AlarmWhen -> when (cmd) {
@@ -900,7 +918,8 @@ class WakeService : Service(), AssistantBus.Controller {
                 when (val c = CommandParser.parse(t)) {
                     Command.Cancel -> 4
                     is Command.Call -> 1 + contactScore(c.target)
-                    is Command.Navigate, is Command.Play, is Command.Alarm, is Command.AlarmIn, is Command.Timer -> 2
+                    is Command.Navigate, is Command.Play, is Command.Alarm, is Command.AlarmIn, is Command.Timer,
+                    Command.AddEvent -> 2
                     Command.CallWho, Command.NavigateWhere, Command.PlayWhat, Command.AlarmWhen, Command.TimerHowLong -> 1
                     else -> 0
                 }
@@ -912,7 +931,10 @@ class WakeService : Service(), AssistantBus.Controller {
             }
             Pending.AlarmWhen -> best { if (TimeParser.clock(it) != null) 1 else 0 }
             Pending.TimerHowLong -> best { if (TimeParser.duration(it) != null) 1 else 0 }
-            Pending.WhereToGo, Pending.WhatToPlay -> texts[0]
+            Pending.WhereToGo, Pending.WhatToPlay, is Pending.EventTitle -> texts[0]
+            is Pending.EventWhen -> best {
+                val s = CalendarParser.parse(it, java.time.LocalDate.now()); if (s.date != null || s.time != null) 1 else 0
+            }
             is Pending.Confirm -> best { if (ChoiceParser.yesNo(it) != null) 1 else 0 }
         }
     }
@@ -1035,6 +1057,34 @@ class WakeService : Service(), AssistantBus.Controller {
         navConfirmed = false
         speak("Avvio la navigazione verso $shown")
         launchApp(AssistantBus.Launch.Navigate(destination), "Navigazione verso $shown", "Nessuna app di navigazione trovata.")
+    }
+
+    // ---- calendario ----
+
+    private fun addEvent(spec: CalendarParser.EventSpec) {
+        if (!CalendarStore.hasPermission(this)) {
+            finish("Manca il permesso del calendario: concedilo nell'app.", error = true); return
+        }
+        if (spec.title.isBlank()) { ask("Come si chiama l'evento?", Pending.EventTitle(spec)); return }
+        if (spec.date == null && spec.time == null) { ask("Quando?", Pending.EventWhen(spec.title)); return }
+
+        val today = java.time.LocalDate.now()
+        // solo l'ora: oggi se non è già passata, altrimenti domani
+        val date = spec.date ?: spec.time!!.let { t ->
+            if (java.time.LocalTime.of(t.hour, t.minute).isAfter(java.time.LocalTime.now())) today else today.plusDays(1)
+        }
+        val calendar = CalendarStore.target(this)
+            ?: run { finish("Non trovo un calendario in cui scrivere.", error = true); return }
+        if (!CalendarStore.insert(this, spec.title, date, spec.time, spec.end)) {
+            finish("Non sono riuscito ad aggiungere l'evento.", error = true); return
+        }
+        val whenText = CalendarParser.describe(date, today) + when {
+            spec.time == null -> ", tutto il giorno"
+            spec.end != null -> " dalle ${spec.time} alle ${spec.end}"
+            else -> " alle ${spec.time}"
+        }
+        Log.i(TAG, "Evento in ${calendar.label}")
+        confirm("Ho aggiunto «${spec.title}» $whenText")
     }
 
     // ---- sveglia e timer ----
