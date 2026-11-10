@@ -106,6 +106,7 @@ class MainActivity : Activity() {
         versionInfo = findViewById(R.id.version_info)
         updateButton = findViewById(R.id.update)
         updateButton.setOnClickListener { startUpdate() }
+        findViewById<Button>(R.id.hide_notification).setOnClickListener { open(Notifications.serviceChannelSettings(this)) }
         setupActivation()
         setupVoice()
         setupFeedback()
@@ -598,6 +599,19 @@ class MainActivity : Activity() {
         toggle.visibility = if (activation == Prefs.Activation.GESTURE) View.GONE else View.VISIBLE
         toggle.text = if (WakeService.running && Prefs.voiceWake(this)) "Ferma ascolto" else "Avvia ascolto"
         heard.visibility = if (WakeService.running && Prefs.voiceWake(this)) View.VISIBLE else View.GONE
+        // notifica fissa: solo con l'ascolto a voce; si può nascondere senza fermare l'ascolto
+        val voice = activation != Prefs.Activation.GESTURE
+        val hidden = Notifications.serviceHidden(this)
+        findViewById<Button>(R.id.hide_notification).apply {
+            visibility = if (voice) View.VISIBLE else View.GONE
+            text = if (hidden) "Notifica di ascolto nascosta ✓ (tocca per riattivarla)" else "Nascondi la notifica di ascolto"
+        }
+        findViewById<TextView>(R.id.notification_info).apply {
+            visibility = if (voice && !hidden) View.VISIBLE else View.GONE
+            text = "Android obbliga a tenerla finché l'assistente ascolta, ma puoi nasconderla: " +
+                "disattiva l'interruttore «Ascolto in background» (l'ascolto continua). " +
+                "Su Android 14 e successivi puoi anche semplicemente scorrerla via."
+        }
         val needsAssistant = activation != Prefs.Activation.VOICE
         assistSet.visibility = if (needsAssistant) View.VISIBLE else View.GONE
         assistInfo.visibility = if (needsAssistant) View.VISIBLE else View.GONE

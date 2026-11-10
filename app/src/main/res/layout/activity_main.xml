@@ -47,6 +47,21 @@
             android:textSize="16sp"
             android:visibility="gone" />
 
+        <Button
+            android:id="@+id/hide_notification"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Nascondi la notifica di ascolto"
+            android:textAllCaps="false" />
+
+        <TextView
+            android:id="@+id/notification_info"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:lineSpacingExtra="3dp"
+            android:textColor="@color/text_dim"
+            android:textSize="14sp" />
+
         <TextView
             android:id="@+id/heard"
             android:layout_width="match_parent"

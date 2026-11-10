@@ -196,7 +196,10 @@ vocabolario del modello Vosk (`graph/words.txt`).
 - **Microfono sempre in ascolto.** Per sentire la frase di attivazione il microfono deve restare
   aperto: Android mostra il **pallino verde** finché ascolta e nessuna app può nasconderlo (solo
   l'assistente di sistema preinstallato usa un canale privilegiato). La notifica dell'app invece è
-  ridotta al minimo: nessuna icona nella barra di stato. Consumo di batteria continuo. Su Xiaomi, Samsung, Oppo ecc. va disattivato il risparmio batteria per l'app,
+  ridotta al minimo: nessuna icona nella barra di stato. Si può anche **nascondere del tutto** senza fermare
+  l'ascolto: pulsante «Nascondi la notifica di ascolto» → disattiva «Ascolto in background» (Android 13+),
+  oppure su Android 14+ basta scorrerla via. Resta la voce «app attive» in fondo alle impostazioni rapide,
+  che Android mostra sempre. Consumo di batteria continuo. Su Xiaomi, Samsung, Oppo ecc. va disattivato il risparmio batteria per l'app,
   altrimenti il sistema la chiude.
 - **Nomi difficili.** Al riconoscitore del telefono vengono suggeriti i nomi della rubrica, e la
   ricerca tollera lettere sbagliate e differenze di pronuncia (Christian/Cristian); se non trova, chiede.

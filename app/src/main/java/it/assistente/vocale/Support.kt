@@ -329,7 +329,7 @@ object Notifications {
     const val ID_WAKE = 2
     const val ID_BOOT = 3
     /** canale "minimo": niente icona nella barra di stato, notifica compressa in fondo */
-    private const val CH_SERVICE = "ascolto_silenzioso"
+    const val CH_SERVICE = "ascolto_silenzioso"
     private const val CH_SERVICE_OLD = "ascolto"
     private const val CH_ALERT = "attivazione"
 
@@ -396,6 +396,20 @@ object Notifications {
     fun cancelWake(c: Context) = nm(c).cancel(ID_WAKE)
 
     fun refreshService(c: Context) = nm(c).notify(ID_SERVICE, service(c))
+
+    /** L'utente ha disattivato la categoria "Ascolto in background"? (l'ascolto continua, la notifica no) */
+    fun serviceHidden(c: Context): Boolean {
+        channels(c)
+        return nm(c).getNotificationChannel(CH_SERVICE)?.importance == NotificationManager.IMPORTANCE_NONE
+    }
+
+    /** Apre direttamente la categoria "Ascolto in background" nelle impostazioni di Android. */
+    fun serviceChannelSettings(c: Context): Intent {
+        channels(c)
+        return Intent(android.provider.Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+            .putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, c.packageName)
+            .putExtra(android.provider.Settings.EXTRA_CHANNEL_ID, CH_SERVICE)
+    }
 
     /** Dopo un riavvio Android non permette di riaccendere il microfono da soli: lo chiediamo all'utente. */
     fun boot(c: Context, title: String = "Assistente vocale spento", text: String = "Tocca per riattivare l'ascolto dopo il riavvio") {
