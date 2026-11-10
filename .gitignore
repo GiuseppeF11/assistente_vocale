@@ -1,0 +1,7 @@
+.gradle/
+.idea/
+build/
+local.properties
+*.iml
+# modello vocale (~50 MB): lo scarica Gradle alla prima build
+app/src/main/assets/model-it/
