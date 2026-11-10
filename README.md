@@ -16,9 +16,8 @@ Oppure inquadra il QR code:
 ![QR per installare](docs/installa-qr.png)
 
 **Aggiornamenti**: a ogni modifica GitHub compila e pubblica una nuova versione. Aprendo l'app compare
-il pulsante verde **«Aggiorna a 1.N»**: un tocco, scarica e installa (la prima volta Android chiede di
-consentire «Installa app sconosciute» per l'app; dalla seconda in poi su Android 12+ può aggiornare senza
-altre conferme). Dopo l'aggiornamento, se l'ascolto a voce era attivo, una notifica invita a riaprire l'app.
+il pulsante verde **«Aggiorna a 1.N»**: apre il download nel browser, poi si apre il file e si conferma.
+L'app non installa da sola: il permesso di installare app è uno dei segnali che fanno scattare Play Protect. Dopo l'aggiornamento, se l'ascolto a voce era attivo, una notifica invita a riaprire l'app.
 Internet serve solo per questo controllo: il riconoscimento vocale resta sul telefono.
 
 ## Firma

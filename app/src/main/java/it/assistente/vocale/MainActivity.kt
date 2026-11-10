@@ -183,28 +183,14 @@ class MainActivity : Activity() {
         }.start()
     }
 
+    /**
+     * Apre il download dell'ultima versione nel browser: l'app non ha il permesso di installare
+     * altre app (è uno dei segnali che fanno scattare Play Protect).
+     */
     private fun startUpdate() {
         val r = release ?: return
-        // la prima volta Android chiede di consentire l'installazione da questa app
-        if (!packageManager.canRequestPackageInstalls()) {
-            AssistantBus.update("Consenti «Installa app sconosciute» per Assistente Vocale, poi torna qui e premi di nuovo Aggiorna.")
-            open(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
-            return
-        }
-        downloading = true
-        updateButton.isEnabled = false
-        AssistantBus.update("Scarico ${r.name}…")
-        Thread {
-            try {
-                val apk = Updater.download(this, r) { pct -> AssistantBus.update("Scarico ${r.name}… $pct%") }
-                AssistantBus.update("Installo… conferma quando Android te lo chiede.")
-                Updater.install(this, apk)
-            } catch (e: Exception) {
-                AssistantBus.update("Aggiornamento non riuscito: ${e.message}")
-            } finally {
-                runOnUiThread { downloading = false; updateButton.isEnabled = true }
-            }
-        }.start()
+        AssistantBus.update("Scarica il file e aprilo per installare ${r.name}.")
+        open(Intent(Intent.ACTION_VIEW, Uri.parse(r.apkUrl)))
     }
 
     override fun onPause() {
