@@ -66,6 +66,22 @@ class LogicTest {
         assertTrue(!WakeMatcher.matches("ok alfio", ""))
     }
 
+    @Test fun spotify() {
+        fun play(q: String, f: MediaFocus = MediaFocus.ANY) = Command.Play(PlayRequest(q, f))
+        assertEquals(play("bohemian rhapsody"), CommandParser.parse("metti bohemian rhapsody da spotify"))
+        assertEquals(play("albachiara"), CommandParser.parse("Metti \"Albachiara\" su Spotify"))
+        assertEquals(play("vasco rossi"), CommandParser.parse("metti vasco rossi"))
+        assertEquals(play("nevermind", MediaFocus.ALBUM), CommandParser.parse("metti l'album nevermind su spotify"))
+        assertEquals(play("coldplay", MediaFocus.ARTIST), CommandParser.parse("fammi sentire qualcosa dei coldplay"))
+        assertEquals(play("relax", MediaFocus.PLAYLIST), CommandParser.parse("riproduci la playlist relax su spotify"))
+        assertEquals(play("vita spericolata", MediaFocus.SONG), CommandParser.parse("metti la canzone vita spericolata"))
+        assertEquals(play("ligabue"), CommandParser.parse("su spotify metti ligabue"))
+        assertEquals(Command.PlayWhat, CommandParser.parse("metti"))
+        assertEquals(Command.PlayWhat, CommandParser.parse("metti spotify"))
+        // la navigazione resta navigazione
+        assertEquals(Command.Navigate("palermo"), CommandParser.parse("avvia la navigazione per palermo"))
+    }
+
     @Test fun navigazione() {
         assertEquals(Command.Navigate("catania"), CommandParser.parse("portami a catania"))
         assertEquals(Command.Navigate("via etnea 120 catania"), CommandParser.parse("naviga verso via etnea cento venti catania"))

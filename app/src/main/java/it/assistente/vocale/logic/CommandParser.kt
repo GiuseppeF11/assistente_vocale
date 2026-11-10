@@ -1,5 +1,10 @@
 package it.assistente.vocale.logic
 
+/** Cosa si cerca su Spotify: decide quale risultato viene riprodotto. */
+enum class MediaFocus { ANY, SONG, ARTIST, ALBUM, PLAYLIST }
+
+data class PlayRequest(val query: String, val focus: MediaFocus)
+
 sealed interface Command {
     data class Call(val target: String, val kind: NumberKind?, val speaker: Boolean = false) : Command
     /** "chiama" senza dire chi */
@@ -7,6 +12,10 @@ sealed interface Command {
     data class Navigate(val destination: String) : Command
     /** "portami" senza dire dove */
     data object NavigateWhere : Command
+    /** "metti … da Spotify" */
+    data class Play(val request: PlayRequest) : Command
+    /** "metti" senza dire cosa */
+    data object PlayWhat : Command
     data object Cancel : Command
     data class Unknown(val text: String) : Command
 }
@@ -31,6 +40,23 @@ object CommandParser {
             "indicazioni(?: stradali)?|strada|percorso|" +
             "come (?:arrivo|si arriva|faccio ad arrivare|faccio a arrivare))" +
             "(?:\\s+(.*))?$"
+    )
+
+    private val playRe = Regex(
+        "^$FILLERS(?:(?:su |da |apri )?spotify\\s+)?(?:metti(?:mi)?|fammi (?:sentire|ascoltare)|riproduci|suona|" +
+            "ascolta(?:re)?|(?:voglio|vorrei) (?:sentire|ascoltare)|fai partire|play)" +
+            "(?:\\s+(.*))?$"
+    )
+    private val spotifySuffix = Regex("\\s*(?:\\b(?:da|su|con|in|sopra|dentro)\\s+)?\\bspotify$")
+    private val spotifyPrefix = Regex("^(?:su |da )?spotify\\s*")
+    private val focusPrefixes = listOf(
+        MediaFocus.SONG to Regex("^(?:la |una )?canzone\\s+|^(?:il |un )?brano\\s+|^(?:il |un )?pezzo\\s+"),
+        MediaFocus.ALBUM to Regex("^(?:l' ?|un )?album\\s+|^(?:il |un )?disco\\s+"),
+        MediaFocus.PLAYLIST to Regex("^(?:la |una )?playlist\\s+"),
+        MediaFocus.ARTIST to Regex(
+            "^(?:l' ?)?artista\\s+|^(?:qualcosa|musica|canzoni|qualche canzone|un po' di musica|i successi|le canzoni)" +
+                " (?:di|dei|degli|delle|del|della|dello)\\s+"
+        ),
     )
 
     private val cancelRe = Regex(
@@ -67,6 +93,10 @@ object CommandParser {
             val dest = destination(m.groupValues[1])
             return if (dest.isEmpty()) Command.NavigateWhere else Command.Navigate(dest)
         }
+        playRe.find(text)?.let { m ->
+            val req = playRequest(m.groupValues[1])
+            return if (req.query.isEmpty()) Command.PlayWhat else Command.Play(req)
+        }
         return Command.Unknown(text)
     }
 
@@ -100,6 +130,21 @@ object CommandParser {
     fun destination(raw: String): String {
         val t = stripLeading(clean(raw), navLead, null)
         return ItalianNumbers.digitsInText(t)
+    }
+
+    /** Ripulisce "l'album nevermind da spotify" -> ("nevermind", ALBUM). */
+    fun playRequest(raw: String): PlayRequest {
+        var t = clean(raw)
+        t = spotifyPrefix.replaceFirst(t, "")
+        t = spotifySuffix.replace(t, "").trim()
+        var focus = MediaFocus.ANY
+        for ((f, re) in focusPrefixes) {
+            val m = re.find(t) ?: continue
+            focus = f
+            t = t.removeRange(m.range).trim()
+            break
+        }
+        return PlayRequest(t, focus)
     }
 
     fun kindOf(tokens: List<String>): NumberKind? = when {

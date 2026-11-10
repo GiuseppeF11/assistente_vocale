@@ -40,6 +40,7 @@ import it.assistente.vocale.logic.ItalianNumbers
 import it.assistente.vocale.logic.Match
 import it.assistente.vocale.logic.NumberKind
 import it.assistente.vocale.logic.PhoneNumber
+import it.assistente.vocale.logic.PlayRequest
 import it.assistente.vocale.logic.Text
 import it.assistente.vocale.logic.WakeMatcher
 import org.json.JSONArray
@@ -61,6 +62,8 @@ class WakeService : Service(), AssistantBus.Controller {
     companion object {
         const val ACTION_STOP = "it.assistente.vocale.STOP"
         const val ACTION_RELOAD = "it.assistente.vocale.RELOAD"
+        /** chiamato con il tasto/gesto dell'assistente: si salta la frase di attivazione */
+        const val ACTION_SESSION = "it.assistente.vocale.SESSION"
 
         private const val RATE_HZ = 16000
         /** nessuna parola entro questo tempo: si chiude */
@@ -83,14 +86,20 @@ class WakeService : Service(), AssistantBus.Controller {
         fun start(c: Context) = c.startForegroundService(Intent(c, WakeService::class.java))
         fun stop(c: Context) { c.stopService(Intent(c, WakeService::class.java)) }
 
+        fun startSession(c: Context) =
+            c.startForegroundService(Intent(c, WakeService::class.java).setAction(ACTION_SESSION))
+
         /** Applica le impostazioni cambiate (frase di attivazione) senza fermare l'ascolto. */
         fun reload(c: Context) {
             if (running) c.startService(Intent(c, WakeService::class.java).setAction(ACTION_RELOAD))
         }
     }
 
-    /** EXTERNAL: il microfono è stato ceduto al riconoscitore di sistema. */
-    private enum class Mode { WAKE, COMMAND, PAUSED, EXTERNAL }
+    /**
+     * EXTERNAL: il microfono è stato ceduto al riconoscitore di sistema.
+     * IDLE: microfono chiuso (modalità tasto/gesto, tra un comando e l'altro).
+     */
+    private enum class Mode { WAKE, COMMAND, PAUSED, EXTERNAL, IDLE }
 
     /** In ordine di preferenza; si scende quando un livello non funziona su questo telefono. */
     private enum class Asr(val label: String) {
@@ -104,6 +113,7 @@ class WakeService : Service(), AssistantBus.Controller {
         data object Fresh : Pending
         data object WhoToCall : Pending
         data object WhereToGo : Pending
+        data object WhatToPlay : Pending
         data class PickContact(val candidates: List<Contact>, val kind: NumberKind?) : Pending
         data class PickNumber(val contact: Contact, val numbers: List<PhoneNumber>) : Pending
     }
@@ -120,6 +130,8 @@ class WakeService : Service(), AssistantBus.Controller {
     @Volatile private var wakePhrase = Prefs.DEFAULT_WAKE
     @Volatile private var wakeDirty = false
     @Volatile private var contacts: List<Contact> = emptyList()
+    /** il modello Vosk si carica solo se serve (frase di attivazione o riserva) */
+    @Volatile private var voskNeeded = false
     private var audioThread: Thread? = null
 
     // --- solo thread audio ---
@@ -146,6 +158,8 @@ class WakeService : Service(), AssistantBus.Controller {
     /** cambia a ogni nuovo ascolto: scarta le risposte tardive di un riconoscitore precedente */
     private var listenSeq = 0
     private val overlay by lazy { AssistantOverlay(this) }
+    /** il dialogo è mostrato dalla sessione dell'assistente di sistema (tasto/gesto) */
+    private var sessionUi = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -161,10 +175,9 @@ class WakeService : Service(), AssistantBus.Controller {
                 return START_NOT_STICKY
             }
             ACTION_RELOAD -> {
-                if (alive) {
-                    applySettings()
-                    return START_NOT_STICKY
-                }
+                if (alive) applySettings()
+                // senza ascolto a voce il servizio non deve partire solo per ricaricare
+                if (alive || !Prefs.voiceWake(this)) return START_NOT_STICKY
             }
         }
         if (!granted(Manifest.permission.RECORD_AUDIO)) {
@@ -185,6 +198,10 @@ class WakeService : Service(), AssistantBus.Controller {
             return START_NOT_STICKY
         }
         if (!alive) startEngine()
+        if (intent?.action == ACTION_SESSION) {
+            sessionUi = true
+            onWake()
+        }
         // NOT_STICKY: un riavvio automatico dal sistema non avrebbe comunque accesso al microfono
         return START_NOT_STICKY
     }
@@ -196,15 +213,32 @@ class WakeService : Service(), AssistantBus.Controller {
             wakeDirty = true
         }
         asrLevel = Asr.ON_DEVICE
+        biasingOk = true
+        tts?.shutdown()
+        ttsReady = false
+        initTts()
         Notifications.refreshService(this)
-        AssistantBus.status("In ascolto: di' «$wakePhrase»")
+        val inDialog = AssistantBus.state.phase != Phase.HIDDEN
+        if (!inDialog) {
+            if (!Prefs.voiceWake(this)) { stopSelf(); return }
+            voskNeeded = true
+            mode = idleMode()
+        }
+        AssistantBus.status(statusText())
     }
+
+    private fun idleMode() = if (Prefs.voiceWake(this)) Mode.WAKE else Mode.IDLE
+
+    private fun statusText() =
+        if (Prefs.voiceWake(this)) "In ascolto: di' «$wakePhrase»" else "Pronto (tasto o gesto)"
 
     private fun startEngine() {
         alive = true
         running = true
         failed = false
         wakePhrase = Prefs.wakePhrase(this)
+        mode = idleMode()
+        voskNeeded = Prefs.voiceWake(this)
         AssistantBus.controller = this
 
         wakeLock = getSystemService(PowerManager::class.java)
@@ -233,7 +267,9 @@ class WakeService : Service(), AssistantBus.Controller {
         Notifications.cancelWake(this)
         AssistantBus.hide()
         AssistantBus.heard("")
-        if (wasListening) AssistantBus.status("Ascolto disattivato")
+        if (wasListening) AssistantBus.status(
+            if (Prefs.activation(this) == Prefs.Activation.GESTURE) "Si attiva con il tasto o il gesto" else "Ascolto disattivato"
+        )
         super.onDestroy()
     }
 
@@ -249,7 +285,7 @@ class WakeService : Service(), AssistantBus.Controller {
     // =============================================================================================
 
     private fun initTts() {
-        tts = TextToSpeech(this) { status ->
+        tts = TextToSpeech(this, { status ->
             val t = tts ?: return@TextToSpeech
             if (status != TextToSpeech.SUCCESS) {
                 AssistantBus.tts("Sintesi vocale non disponibile")
@@ -261,9 +297,11 @@ class WakeService : Service(), AssistantBus.Controller {
                 AssistantBus.tts("Voce italiana non installata: le domande appariranno solo a schermo")
                 return@TextToSpeech
             }
-            val voice = bestItalianVoice(t)
+            // la voce scelta nelle impostazioni, altrimenti la migliore installata
+            val chosen = Prefs.ttsVoice(this)?.let { name -> t.voices.orEmpty().firstOrNull { it.name == name } }
+            val voice = chosen ?: bestItalianVoice(t)
             if (voice != null) t.voice = voice
-            t.setSpeechRate(1.05f)
+            t.setSpeechRate(Prefs.ttsRate(this))
             t.setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ASSISTANT)
@@ -277,9 +315,8 @@ class WakeService : Service(), AssistantBus.Controller {
                 override fun onError(id: String?) { main.post { speechFinished(id) } }
             })
             ttsReady = true
-            val name = t.defaultEngine?.substringAfterLast('.') ?: ""
-            AssistantBus.tts("Voce italiana pronta" + if (name.isNotEmpty()) " ($name)" else "")
-        }
+            AssistantBus.tts("Voce pronta: ${voice?.name ?: "predefinita"}")
+        }, Prefs.ttsEngine(this))
     }
 
     /** La voce italiana installata di qualità più alta, senza bisogno di internet. */
@@ -320,14 +357,17 @@ class WakeService : Service(), AssistantBus.Controller {
 
     private fun runEngine() {
         try {
-            AssistantBus.status("Carico il modello vocale…")
+            // modalità tasto/gesto: Vosk serve solo come riserva, non lo si carica finché non occorre
+            while (alive && !voskNeeded) SystemClock.sleep(100)
+            if (!alive) return
+            if (Prefs.voiceWake(this)) AssistantBus.status("Carico il modello vocale…")
             val path = ModelInstaller.ensure(this)
             Model(path).use { model ->
                 Recognizer(model, RATE_HZ.toFloat()).use { cmd ->
                     // più ipotesi per frase: si sceglie quella che corrisponde a un contatto o a un comando
                     cmd.setMaxAlternatives(3)
                     wakeRec = newWakeRecognizer(model)
-                    AssistantBus.status("In ascolto: di' «$wakePhrase»")
+                    AssistantBus.status(statusText())
                     try {
                         audioLoop(model, cmd)
                     } finally {
@@ -381,7 +421,7 @@ class WakeService : Service(), AssistantBus.Controller {
 
     private fun audioLoop(model: Model, cmd: Recognizer) {
         while (alive) {
-            if (mode == Mode.EXTERNAL) {
+            if (mode == Mode.EXTERNAL || mode == Mode.IDLE) {
                 micReleased = true
                 SystemClock.sleep(50)
                 continue
@@ -406,7 +446,7 @@ class WakeService : Service(), AssistantBus.Controller {
         var lastPartial = ""
         var verifyAt = 0L
         resetRequested = true
-        while (alive && mode != Mode.EXTERNAL) {
+        while (alive && mode != Mode.EXTERNAL && mode != Mode.IDLE) {
             if (wakeDirty) {
                 wakeDirty = false
                 wakeRec?.close()
@@ -428,7 +468,7 @@ class WakeService : Service(), AssistantBus.Controller {
             if (now < muteUntil) continue
 
             when (mode) {
-                Mode.PAUSED, Mode.EXTERNAL -> Unit
+                Mode.PAUSED, Mode.EXTERNAL, Mode.IDLE -> Unit
 
                 Mode.WAKE -> {
                     ring.write(buf, n)
@@ -539,13 +579,14 @@ class WakeService : Service(), AssistantBus.Controller {
         if (asrLevel == Asr.ON_DEVICE &&
             !(Build.VERSION.SDK_INT >= 31 && SpeechRecognizer.isOnDeviceRecognitionAvailable(this))
         ) asrLevel = Asr.SYSTEM
-        if (asrLevel == Asr.SYSTEM && !SpeechRecognizer.isRecognitionAvailable(this)) asrLevel = Asr.VOSK
+        if (asrLevel == Asr.SYSTEM && Recognizers.google(this) == null) asrLevel = Asr.VOSK
         return asrLevel
     }
 
     private fun listenWith(asr: Asr, seq: Int) {
         if (!alive || seq != listenSeq) return
         if (asr == Asr.VOSK) {
+            voskNeeded = true
             beep()
             muteUntil = SystemClock.elapsedRealtime() + 300
             resetRequested = true
@@ -575,7 +616,7 @@ class WakeService : Service(), AssistantBus.Controller {
         destroySystemRecognizer()
         val sr = try {
             if (asr == Asr.ON_DEVICE && Build.VERSION.SDK_INT >= 31) SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
-            else SpeechRecognizer.createSpeechRecognizer(this)
+            else Recognizers.google(this)?.let { SpeechRecognizer.createSpeechRecognizer(this, it) }
         } catch (e: Exception) {
             Log.w(TAG, "Riconoscitore di sistema non creato", e)
             null
@@ -660,7 +701,7 @@ class WakeService : Service(), AssistantBus.Controller {
     private fun degrade(asr: Asr, persist: Boolean, seq: Int) {
         val next = if (asr == Asr.ON_DEVICE) Asr.SYSTEM else Asr.VOSK
         if (persist && next.ordinal > asrLevel.ordinal) asrLevel = next
-        val actual = if (next == Asr.SYSTEM && !SpeechRecognizer.isRecognitionAvailable(this)) Asr.VOSK else next
+        val actual = if (next == Asr.SYSTEM && Recognizers.google(this) == null) Asr.VOSK else next
         listenWith(actual, seq)
     }
 
@@ -673,6 +714,7 @@ class WakeService : Service(), AssistantBus.Controller {
     private fun biasingStrings(): ArrayList<String> {
         val list = arrayListOf(
             "chiama", "telefona", "portami", "naviga", "vivavoce", "cellulare", "casa", "lavoro", "annulla",
+            "metti", "spotify", "album", "playlist",
         )
         contacts.asSequence().map { it.name }.take(150).forEach { list.add(it) }
         return list
@@ -694,7 +736,8 @@ class WakeService : Service(), AssistantBus.Controller {
         speakerRequested = false
         refreshContacts()
         AssistantBus.post(UiState(Phase.LISTENING, "Ti ascolto…"))
-        showScreen()
+        // con il tasto/gesto il popup lo mostra la sessione dell'assistente
+        if (sessionUi) overlay.remove() else showScreen()
         listen("Ti ascolto…", emptyList())
     }
 
@@ -726,8 +769,10 @@ class WakeService : Service(), AssistantBus.Controller {
                 Command.CallWho -> ask("Chi vuoi chiamare?", Pending.WhoToCall)
                 is Command.Navigate -> navigate(cmd.destination)
                 Command.NavigateWhere -> ask("Dove vuoi andare?", Pending.WhereToGo)
+                is Command.Play -> play(cmd.request)
+                Command.PlayWhat -> ask("Cosa vuoi ascoltare?", Pending.WhatToPlay)
                 else -> ask(
-                    "Non ho capito. Puoi dire «chiama» e un nome, oppure «portami a» e un posto.",
+                    "Non ho capito. Puoi dire «chiama» e un nome, «portami a» e un posto, oppure «metti» e una canzone.",
                     Pending.Fresh, misunderstood = true,
                 )
             }
@@ -745,6 +790,17 @@ class WakeService : Service(), AssistantBus.Controller {
                 is Command.Navigate -> navigate(cmd.destination)
                 is Command.Call -> resolveCall(cmd.target, cmd.kind)
                 else -> navigate(CommandParser.destination(text))
+            }
+
+            Pending.WhatToPlay -> when (cmd) {
+                is Command.Play -> play(cmd.request)
+                is Command.Call -> resolveCall(cmd.target, cmd.kind)
+                is Command.Navigate -> navigate(cmd.destination)
+                else -> {
+                    val req = CommandParser.playRequest(text)
+                    if (req.query.isEmpty()) ask("Cosa vuoi ascoltare?", Pending.WhatToPlay, misunderstood = true)
+                    else play(req)
+                }
             }
 
             is Pending.PickContact -> {
@@ -783,8 +839,8 @@ class WakeService : Service(), AssistantBus.Controller {
                 when (val c = CommandParser.parse(t)) {
                     Command.Cancel -> 4
                     is Command.Call -> 1 + contactScore(c.target)
-                    is Command.Navigate -> 2
-                    Command.CallWho, Command.NavigateWhere -> 1
+                    is Command.Navigate, is Command.Play -> 2
+                    Command.CallWho, Command.NavigateWhere, Command.PlayWhat -> 1
                     else -> 0
                 }
             }
@@ -793,7 +849,7 @@ class WakeService : Service(), AssistantBus.Controller {
             is Pending.PickNumber -> best {
                 if (ChoiceParser.kind(it) != null || ChoiceParser.pick(it, p.numbers.map { n -> n.label }) != null) 1 else 0
             }
-            Pending.WhereToGo -> texts[0]
+            Pending.WhereToGo, Pending.WhatToPlay -> texts[0]
         }
     }
 
@@ -903,20 +959,41 @@ class WakeService : Service(), AssistantBus.Controller {
             }
         }
         speak("Avvio la navigazione verso $shown")
+        launchApp(AssistantBus.Launch.Navigate(destination), "Navigazione verso $shown", "Nessuna app di navigazione trovata.")
+    }
+
+    // ---- musica ----
+
+    private fun play(req: PlayRequest) {
+        if (!Actions.spotifyInstalled(this)) {
+            finish("Spotify non è installato.", error = true); return
+        }
+        val what = when (req.focus) {
+            it.assistente.vocale.logic.MediaFocus.ALBUM -> "l'album ${req.query}"
+            it.assistente.vocale.logic.MediaFocus.PLAYLIST -> "la playlist ${req.query}"
+            else -> req.query
+        }
+        speak("Metto $what su Spotify")
+        launchApp(AssistantBus.Launch.Play(req), "Spotify: $what", "Non riesco ad aprire Spotify.")
+    }
+
+    /**
+     * Sbloccato: l'app si apre subito e il popup sparisce da solo.
+     * Bloccato: ci pensa la schermata, che chiede lo sblocco prima di aprirla.
+     */
+    private fun launchApp(launch: AssistantBus.Launch, message: String, failure: String) {
         if (!isLocked()) {
-            // sbloccato: Maps si apre subito, il popup sparisce da solo
-            AssistantBus.post(UiState(Phase.WORKING, "Navigazione verso $shown", transcript))
+            AssistantBus.post(UiState(Phase.WORKING, message, transcript))
             backToWake()
-            if (Actions.navigate(this, destination)) {
+            if (Actions.run(this, launch)) {
                 main.removeCallbacks(hideRunnable)
                 main.postDelayed(hideRunnable, 1200)
             } else {
-                finish("Nessuna app di navigazione trovata.", error = true)
+                finish(failure, error = true)
             }
             return
         }
-        // bloccato: ci pensa la schermata, che chiede lo sblocco prima di aprire Maps
-        AssistantBus.post(UiState(Phase.WORKING, "Navigazione verso $shown", transcript, navigateTo = destination))
+        AssistantBus.post(UiState(Phase.WORKING, message, transcript, launch = launch))
         backToWake()
     }
 
@@ -951,6 +1028,19 @@ class WakeService : Service(), AssistantBus.Controller {
         Notifications.cancelWake(this)
         AssistantBus.hide()
         backToWake()
+        sessionUi = false
+        // modalità tasto/gesto: finito il dialogo il servizio si chiude (niente microfono, niente notifica)
+        if (!Prefs.voiceWake(this)) stopWhenQuiet()
+    }
+
+    /** Aspetta che la voce finisca la frase prima di chiudere. */
+    private fun stopWhenQuiet() {
+        if (AssistantBus.state.phase != Phase.HIDDEN) return
+        if (tts?.isSpeaking == true || callRunnable != null) {
+            main.postDelayed({ stopWhenQuiet() }, 300)
+            return
+        }
+        stopSelf()
     }
 
     private fun backToWake() {
@@ -958,7 +1048,7 @@ class WakeService : Service(), AssistantBus.Controller {
         destroySystemRecognizer()
         pending = Pending.Fresh
         resetRequested = true
-        mode = Mode.WAKE
+        mode = idleMode()
     }
 
     private fun isLocked(): Boolean =
@@ -989,6 +1079,8 @@ class WakeService : Service(), AssistantBus.Controller {
         cancelPendingCall()
         hide()
     }
+
+    override fun done() = hide()
 
     override fun choose(index: Int) {
         val p = pending

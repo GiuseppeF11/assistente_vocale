@@ -5,6 +5,8 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.SearchManager
+import android.content.ComponentName
 import android.content.ActivityNotFoundException
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -16,11 +18,15 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.ContactsContract.CommonDataKinds.Phone
+import android.provider.MediaStore
+import android.speech.RecognitionService
 import android.telecom.TelecomManager
 import android.util.Log
 import it.assistente.vocale.logic.Contact
+import it.assistente.vocale.logic.MediaFocus
 import it.assistente.vocale.logic.NumberKind
 import it.assistente.vocale.logic.PhoneNumber
+import it.assistente.vocale.logic.PlayRequest
 import it.assistente.vocale.logic.Text
 import java.io.File
 
@@ -38,6 +44,23 @@ object Prefs {
     fun setEnabled(c: Context, v: Boolean) = sp(c).edit().putBoolean("enabled", v).apply()
 
     const val DEFAULT_WAKE = "ciao assistente"
+
+    /** Come si attiva l'assistente. */
+    enum class Activation { VOICE, GESTURE, BOTH }
+
+    fun activation(c: Context): Activation =
+        runCatching { Activation.valueOf(sp(c).getString("activation", "VOICE")!!) }.getOrDefault(Activation.VOICE)
+    fun setActivation(c: Context, v: Activation) = sp(c).edit().putString("activation", v.name).apply()
+
+    /** Frase di attivazione attiva: modalità a voce (o entrambe) e ascolto acceso dall'utente. */
+    fun voiceWake(c: Context) = activation(c) != Activation.GESTURE && enabled(c)
+
+    // voce dell'assistente: null = automatico
+    fun ttsEngine(c: Context): String? = sp(c).getString("tts_engine", null)
+    fun ttsVoice(c: Context): String? = sp(c).getString("tts_voice", null)
+    fun ttsRate(c: Context): Float = sp(c).getFloat("tts_rate", 1.05f)
+    fun setTts(c: Context, engine: String?, voice: String?, rate: Float) = sp(c).edit()
+        .putString("tts_engine", engine).putString("tts_voice", voice).putFloat("tts_rate", rate).apply()
 
     fun wakePhrase(c: Context): String =
         Text.spoken(sp(c).getString("wake", DEFAULT_WAKE)!!).ifEmpty { DEFAULT_WAKE }
@@ -186,6 +209,50 @@ object Actions {
         main.postDelayed(check, 800)
     }
 
+    const val SPOTIFY = "com.spotify.music"
+
+    fun spotifyInstalled(c: Context) = c.packageManager.getLaunchIntentForPackage(SPOTIFY) != null
+
+    /**
+     * Chiede a Spotify di cercare e riprodurre (lo stesso meccanismo usato dagli assistenti vocali).
+     * Se la versione installata non lo accetta, apre almeno la ricerca.
+     */
+    fun play(c: Context, req: PlayRequest): Boolean {
+        val focus = when (req.focus) {
+            MediaFocus.SONG -> "vnd.android.cursor.item/audio"
+            MediaFocus.ARTIST -> MediaStore.Audio.Artists.ENTRY_CONTENT_TYPE
+            MediaFocus.ALBUM -> MediaStore.Audio.Albums.ENTRY_CONTENT_TYPE
+            MediaFocus.PLAYLIST -> MediaStore.Audio.Playlists.ENTRY_CONTENT_TYPE
+            MediaFocus.ANY -> "vnd.android.cursor.item/*"
+        }
+        val playIntent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
+            .setPackage(SPOTIFY)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            .putExtra(SearchManager.QUERY, req.query)
+            .putExtra(MediaStore.EXTRA_MEDIA_FOCUS, focus)
+            .apply {
+                when (req.focus) {
+                    MediaFocus.SONG -> putExtra(MediaStore.EXTRA_MEDIA_TITLE, req.query)
+                    MediaFocus.ARTIST -> putExtra(MediaStore.EXTRA_MEDIA_ARTIST, req.query)
+                    MediaFocus.ALBUM -> putExtra(MediaStore.EXTRA_MEDIA_ALBUM, req.query)
+                    MediaFocus.PLAYLIST -> putExtra(MediaStore.EXTRA_MEDIA_PLAYLIST, req.query)
+                    MediaFocus.ANY -> Unit
+                }
+            }
+        val search = Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:" + Uri.encode(req.query)))
+            .setPackage(SPOTIFY)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        for (intent in listOf(playIntent, search)) {
+            try { c.startActivity(intent); return true } catch (_: ActivityNotFoundException) { }
+        }
+        return false
+    }
+
+    fun run(c: Context, launch: AssistantBus.Launch): Boolean = when (launch) {
+        is AssistantBus.Launch.Navigate -> navigate(c, launch.destination)
+        is AssistantBus.Launch.Play -> play(c, launch.request)
+    }
+
     /** Apre la navigazione guidata; va chiamata da una Activity a telefono sbloccato. */
     fun navigate(c: Context, destination: String): Boolean {
         val q = Uri.encode(destination)
@@ -292,5 +359,25 @@ object Notifications {
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action == Intent.ACTION_BOOT_COMPLETED && Prefs.enabled(context)) Notifications.boot(context)
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Il riconoscitore vocale di Google, indicato esplicitamente.
+ * Quando questa app è l'assistente del telefono, il riconoscitore "predefinito" diventa il nostro
+ * (RecognizerProxyService): senza indicarlo esplicitamente si finirebbe a chiamare noi stessi.
+ */
+object Recognizers {
+    private val preferred = listOf("com.google.android.googlequicksearchbox", "com.google.android.tts")
+
+    fun google(c: Context): ComponentName? {
+        val services = c.packageManager.queryIntentServices(Intent(RecognitionService.SERVICE_INTERFACE), 0)
+            .mapNotNull { it.serviceInfo }
+            .filter { it.packageName != c.packageName }
+        val best = services.minByOrNull { preferred.indexOf(it.packageName).let { i -> if (i < 0) 99 else i } }
+            ?: return null
+        return ComponentName(best.packageName, best.name)
     }
 }

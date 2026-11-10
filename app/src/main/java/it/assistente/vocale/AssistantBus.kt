@@ -2,6 +2,7 @@ package it.assistente.vocale
 
 import android.os.Handler
 import android.os.Looper
+import it.assistente.vocale.logic.PlayRequest
 import java.util.concurrent.CopyOnWriteArraySet
 
 /**
@@ -12,6 +13,12 @@ object AssistantBus {
 
     enum class Phase { HIDDEN, LISTENING, ASKING, WORKING, DONE, ERROR }
 
+    /** App da aprire a fine dialogo; a telefono bloccato serve prima lo sblocco. */
+    sealed interface Launch {
+        data class Navigate(val destination: String) : Launch
+        data class Play(val request: PlayRequest) : Launch
+    }
+
     data class UiState(
         val phase: Phase = Phase.HIDDEN,
         /** cosa sta facendo o chiedendo l'assistente */
@@ -20,13 +27,15 @@ object AssistantBus {
         val transcript: String = "",
         /** scelte proposte quando serve un chiarimento */
         val options: List<String> = emptyList(),
-        /** destinazione da aprire nel navigatore: la esegue la schermata, che può sbloccare il telefono */
-        val navigateTo: String? = null,
+        /** app da aprire: la apre la schermata, che può chiedere lo sblocco */
+        val launch: Launch? = null,
     )
 
     interface Controller {
         fun cancel()
         fun choose(index: Int)
+        /** dialogo concluso dalla schermata (app aperta dopo lo sblocco): chiude senza zittire la voce */
+        fun done()
     }
 
     @Volatile var state: UiState = UiState()

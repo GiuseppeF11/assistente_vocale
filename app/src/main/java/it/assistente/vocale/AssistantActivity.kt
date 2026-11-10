@@ -14,7 +14,7 @@ import it.assistente.vocale.AssistantBus.Phase
 class AssistantActivity : Activity() {
 
     private lateinit var card: AssistantCard
-    private var handledDestination: String? = null
+    private var handledLaunch: AssistantBus.Launch? = null
     private val listener = Runnable { render() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,27 +54,27 @@ class AssistantActivity : Activity() {
         if (s.phase == Phase.HIDDEN) { finish(); return }
         card.render(s)
 
-        val destination = s.navigateTo
-        if (destination != null && destination != handledDestination) {
-            handledDestination = destination
-            startNavigation(destination)
+        val launch = s.launch
+        if (launch != null && launch != handledLaunch) {
+            handledLaunch = launch
+            unlockAndLaunch(launch)
         }
     }
 
-    /** Il navigatore non può comparire sopra il blocco schermo: prima si chiede lo sblocco. */
-    private fun startNavigation(destination: String) {
+    /** Maps e Spotify non possono comparire sopra il blocco schermo: prima si chiede lo sblocco. */
+    private fun unlockAndLaunch(target: AssistantBus.Launch) {
         val launch = {
-            Actions.navigate(this, destination)
-            AssistantBus.hide()
+            Actions.run(this, target)
+            AssistantBus.controller?.done() ?: AssistantBus.hide()
         }
         val keyguard = getSystemService(KeyguardManager::class.java)
         if (!keyguard.isKeyguardLocked) { launch(); return }
 
-        AssistantBus.post(AssistantBus.state.copy(message = "Sblocca per avviare la navigazione"))
+        AssistantBus.post(AssistantBus.state.copy(message = "Sblocca il telefono per continuare"))
         keyguard.requestDismissKeyguard(this, object : KeyguardManager.KeyguardDismissCallback() {
             override fun onDismissSucceeded() = launch()
-            override fun onDismissCancelled() = AssistantBus.hide()
-            override fun onDismissError() = AssistantBus.hide()
+            override fun onDismissCancelled() { AssistantBus.controller?.cancel() ?: AssistantBus.hide() }
+            override fun onDismissError() { AssistantBus.controller?.cancel() ?: AssistantBus.hide() }
         })
     }
 }

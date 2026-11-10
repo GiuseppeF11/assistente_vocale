@@ -88,6 +88,66 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="28dp"
+            android:text="Come si attiva"
+            android:textColor="@color/text"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <RadioGroup
+            android:id="@+id/activation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp">
+
+            <RadioButton
+                android:id="@+id/act_voice"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="A voce (microfono sempre in ascolto)"
+                android:textColor="@color/text"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/act_gesture"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="Con tasto o gesto (microfono solo quando lo chiami)"
+                android:textColor="@color/text"
+                android:textSize="16sp" />
+
+            <RadioButton
+                android:id="@+id/act_both"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:minHeight="48dp"
+                android:text="Entrambi"
+                android:textColor="@color/text"
+                android:textSize="16sp" />
+
+        </RadioGroup>
+
+        <TextView
+            android:id="@+id/assist_info"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:lineSpacingExtra="3dp"
+            android:textColor="@color/text_dim"
+            android:textSize="15sp" />
+
+        <Button
+            android:id="@+id/assist_set"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Imposta come assistente del telefono"
+            android:textAllCaps="false" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
             android:text="Frase di attivazione"
             android:textColor="@color/text"
             android:textSize="18sp"
@@ -196,6 +256,53 @@
             android:textStyle="bold" />
 
         <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Motore"
+            android:textColor="@color/text_dim"
+            android:textSize="14sp" />
+
+        <Spinner
+            android:id="@+id/tts_engine"
+            android:layout_width="match_parent"
+            android:layout_height="48dp" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="Voce"
+            android:textColor="@color/text_dim"
+            android:textSize="14sp" />
+
+        <Spinner
+            android:id="@+id/tts_voice"
+            android:layout_width="match_parent"
+            android:layout_height="48dp" />
+
+        <TextView
+            android:id="@+id/tts_rate_label"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:textColor="@color/text_dim"
+            android:textSize="14sp" />
+
+        <SeekBar
+            android:id="@+id/tts_rate"
+            android:layout_width="match_parent"
+            android:layout_height="40dp"
+            android:max="80" />
+
+        <Button
+            android:id="@+id/tts_test"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="▶  Prova la voce"
+            android:textAllCaps="false" />
+
+        <TextView
             android:id="@+id/tts_info"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -208,7 +315,7 @@
             android:id="@+id/tts_install"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Installa / aggiorna la voce italiana"
+            android:text="Scarica altre voci italiane"
             android:textAllCaps="false" />
 
         <TextView

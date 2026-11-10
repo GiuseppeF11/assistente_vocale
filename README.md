@@ -1,6 +1,6 @@
 # Assistente Vocale (Android, offline)
 
-Assistente vocale leggero che fa due cose: **chiamare** e **avviare la navigazione**.
+Assistente vocale leggero che fa tre cose: **chiamare**, **avviare la navigazione** e **mettere musica su Spotify**.
 Frase di attivazione riconosciuta da Vosk, sempre in locale. I comandi li capisce il riconoscitore
 vocale del telefono (Google, sul dispositivo e offline quando l'italiano è scaricato), con Vosk come riserva.
 
@@ -28,6 +28,9 @@ vocale del telefono (Google, sul dispositivo e offline quando l'italiano è scar
 | «portami a Catania» / «naviga verso via Etnea centoventi» | apre la navigazione guidata |
 | «portami a casa» / «al lavoro» | usa gli indirizzi salvati nell'app |
 | «portami» | «Dove vuoi andare?» |
+| «metti Albachiara da Spotify» | cerca e riproduce su Spotify |
+| «metti l'album Nevermind» / «la playlist Relax» / «qualcosa dei Coldplay» | album, playlist, artista |
+| «metti» | «Cosa vuoi ascoltare?» |
 | «annulla», «lascia stare» | chiude |
 
 Alle domande si risponde a voce («Rossi», «il secondo», «cellulare») oppure toccando l'opzione.
@@ -54,6 +57,30 @@ Il progetto contiene `.github/workflows/apk.yml`: caricato su un repository GitH
 modifica compila da solo l'APK. Si scarica da **Actions → ultima esecuzione → Artifacts →
 AssistenteVocale-apk** (uno zip con dentro `app-debug.apk`), poi si copia sul telefono e si installa
 consentendo le «origini sconosciute».
+
+## Come si attiva (a scelta nell'app)
+
+| Modalità | Come | Microfono |
+|---|---|---|
+| A voce | dici la frase di attivazione | sempre in ascolto (pallino verde fisso) |
+| Tasto o gesto | tieni premuto il tasto di accensione o fai il gesto dell'assistente | acceso solo durante il comando |
+| Entrambi | tutte e due | sempre in ascolto |
+
+Per il tasto/gesto l'app va scelta come **«App assistente digitale»** (pulsante nell'app, oppure
+Impostazioni → App → App predefinite). Finché è scelta, «Ok Google» non risponde. Su alcuni telefoni
+(Samsung, Xiaomi) la pressione lunga del tasto di accensione va associata all'assistente nelle
+impostazioni del tasto laterale. Quando un'app è l'assistente, è anche il riconoscitore vocale
+predefinito: questa inoltra tutto a Google, così le altre app che usano la dettatura continuano a funzionare.
+
+## Voce
+
+Nell'app si scelgono motore (Google, Samsung, …), voce italiana e velocità, con un pulsante di prova.
+«Automatica» usa la migliore voce italiana offline installata.
+
+## Spotify
+
+L'app chiede a Spotify di cercare e riprodurre, con lo stesso meccanismo usato dagli assistenti vocali.
+Se la versione di Spotify non lo accetta, si apre almeno la ricerca. A telefono bloccato serve prima lo sblocco.
 
 ## Frase di attivazione: doppia verifica
 

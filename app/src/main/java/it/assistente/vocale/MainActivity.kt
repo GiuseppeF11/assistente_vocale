@@ -2,6 +2,7 @@ package it.assistente.vocale
 
 import android.Manifest
 import android.app.Activity
+import android.app.role.RoleManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
@@ -13,9 +14,15 @@ import android.speech.RecognitionSupportCallback
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
+import android.speech.tts.Voice
 import android.view.View
+import android.widget.AdapterView
+import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
+import android.widget.RadioGroup
+import android.widget.SeekBar
+import android.widget.Spinner
 import android.widget.Switch
 import android.widget.TextView
 import it.assistente.vocale.logic.Text
@@ -34,7 +41,20 @@ class MainActivity : Activity() {
     private lateinit var ttsInfo: TextView
     private lateinit var home: EditText
     private lateinit var work: EditText
+    private lateinit var assistInfo: TextView
+    private lateinit var assistSet: Button
+    private lateinit var engineSpinner: Spinner
+    private lateinit var voiceSpinner: Spinner
+    private lateinit var rateBar: SeekBar
+    private lateinit var rateLabel: TextView
     private var languageInfo = ""
+    private var voiceInfo = ""
+
+    // anteprima della voce: un motore vocale tutto per le impostazioni
+    private var preview: TextToSpeech? = null
+    private var previewGen = 0
+    private var engines: List<TextToSpeech.EngineInfo> = emptyList()
+    private var voices: List<Voice> = emptyList()
     private var probe: SpeechRecognizer? = null
     private val listener = Runnable { refresh() }
 
@@ -62,6 +82,15 @@ class MainActivity : Activity() {
         home = findViewById(R.id.home)
         work = findViewById(R.id.work)
 
+        assistInfo = findViewById(R.id.assist_info)
+        assistSet = findViewById(R.id.assist_set)
+        engineSpinner = findViewById(R.id.tts_engine)
+        voiceSpinner = findViewById(R.id.tts_voice)
+        rateBar = findViewById(R.id.tts_rate)
+        rateLabel = findViewById(R.id.tts_rate_label)
+        setupActivation()
+        setupVoice()
+
         home.setText(Prefs.home(this))
         work.setText(Prefs.work(this))
         wake.setText(Prefs.wakePhrase(this))
@@ -81,7 +110,8 @@ class MainActivity : Activity() {
         }
         downloadIt.setOnClickListener { downloadItalian() }
         findViewById<Button>(R.id.tts_install).setOnClickListener {
-            open(Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA))
+            // le voci si scaricano dalle impostazioni del motore (es. Google: Impostazioni → Installa dati vocali)
+            open(Intent(TextToSpeech.Engine.ACTION_INSTALL_TTS_DATA).setPackage(Prefs.ttsEngine(this) ?: preview?.defaultEngine))
         }
 
         findViewById<Button>(R.id.grant).setOnClickListener { requestPermissions(permissions, 1) }
@@ -92,7 +122,7 @@ class MainActivity : Activity() {
             open(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName")))
         }
         toggle.setOnClickListener {
-            if (WakeService.running) {
+            if (WakeService.running && Prefs.voiceWake(this)) {
                 Prefs.setEnabled(this, false)
                 WakeService.stop(this)
             } else if (!granted(Manifest.permission.RECORD_AUDIO)) {
@@ -109,7 +139,7 @@ class MainActivity : Activity() {
         super.onResume()
         AssistantBus.addListener(listener)
         // dopo un riavvio (o se il sistema ha chiuso il servizio) basta riaprire l'app
-        if (Prefs.enabled(this) && !WakeService.running && granted(Manifest.permission.RECORD_AUDIO)) {
+        if (Prefs.voiceWake(this) && !WakeService.running && granted(Manifest.permission.RECORD_AUDIO)) {
             WakeService.start(this)
         }
         checkItalianOffline()
@@ -124,6 +154,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         probe?.destroy()
+        preview?.shutdown()
         super.onDestroy()
     }
 
@@ -133,6 +164,146 @@ class MainActivity : Activity() {
 
     private fun open(intent: Intent) {
         try { startActivity(intent) } catch (e: Exception) { startActivity(Intent(Settings.ACTION_SETTINGS)) }
+    }
+
+    // ---- modalità di attivazione ----
+
+    private fun setupActivation() {
+        val group = findViewById<RadioGroup>(R.id.activation)
+        group.check(
+            when (Prefs.activation(this)) {
+                Prefs.Activation.VOICE -> R.id.act_voice
+                Prefs.Activation.GESTURE -> R.id.act_gesture
+                Prefs.Activation.BOTH -> R.id.act_both
+            }
+        )
+        group.setOnCheckedChangeListener { _, id ->
+            val mode = when (id) {
+                R.id.act_gesture -> Prefs.Activation.GESTURE
+                R.id.act_both -> Prefs.Activation.BOTH
+                else -> Prefs.Activation.VOICE
+            }
+            Prefs.setActivation(this, mode)
+            if (mode != Prefs.Activation.GESTURE && !Prefs.enabled(this)) Prefs.setEnabled(this, true)
+            when {
+                // a voce: serve il servizio in ascolto
+                Prefs.voiceWake(this) && !WakeService.running && granted(Manifest.permission.RECORD_AUDIO) ->
+                    WakeService.start(this)
+                // solo gesto: il servizio si chiude da solo (microfono spento)
+                else -> WakeService.reload(this)
+            }
+            refresh()
+        }
+        assistSet.setOnClickListener {
+            try {
+                startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS))
+            } catch (e: Exception) {
+                open(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS))
+            }
+        }
+    }
+
+    private fun isAssistant(): Boolean = try {
+        getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_ASSISTANT)
+    } catch (e: Exception) { false }
+
+    // ---- voce ----
+
+    private fun setupVoice() {
+        val rate = Prefs.ttsRate(this)
+        rateBar.progress = ((rate - 0.6f) * 100).toInt().coerceIn(0, 80)
+        showRate()
+        rateBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) = showRate()
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {
+                saveVoice(Prefs.ttsEngine(this@MainActivity), Prefs.ttsVoice(this@MainActivity))
+            }
+        })
+        findViewById<Button>(R.id.tts_test).setOnClickListener { testVoice() }
+        startPreview(Prefs.ttsEngine(this))
+    }
+
+    private fun currentRate() = 0.6f + rateBar.progress / 100f
+
+    private fun showRate() {
+        rateLabel.text = "Velocità: ${"%.2f".format(currentRate())}×"
+    }
+
+    private fun startPreview(engine: String?) {
+        preview?.shutdown()
+        val gen = ++previewGen
+        voiceInfo = "Carico le voci…"
+        preview = TextToSpeech(this, { status -> if (gen == previewGen) onPreviewReady(status, engine) }, engine)
+    }
+
+    private fun onPreviewReady(status: Int, engine: String?) {
+        val t = preview ?: return
+        if (status != TextToSpeech.SUCCESS) { voiceInfo = "Motore vocale non disponibile"; refresh(); return }
+
+        // motori installati (Google, Samsung, …)
+        engines = t.engines.orEmpty()
+        val selectedEngine = engine ?: t.defaultEngine
+        bindSpinner(engineSpinner, engines.map { it.label }, engines.indexOfFirst { it.name == selectedEngine }.coerceAtLeast(0)) { i ->
+            val pkg = engines.getOrNull(i)?.name
+            if (pkg != null && pkg != (Prefs.ttsEngine(this) ?: t.defaultEngine)) {
+                saveVoice(pkg, null)
+                startPreview(pkg)
+            }
+        }
+
+        // voci italiane del motore scelto: prima quelle offline
+        voices = try {
+            t.voices.orEmpty()
+                .filter { it.locale.language == "it" }
+                .filter { TextToSpeech.Engine.KEY_FEATURE_NOT_INSTALLED !in it.features.orEmpty() }
+                .sortedWith(compareBy<Voice>({ it.isNetworkConnectionRequired }, { it.name }))
+        } catch (e: Exception) { emptyList() }
+        val labels = listOf("Automatica") + voices.mapIndexed { i, v ->
+            val where = if (v.isNetworkConnectionRequired) "serve internet" else "offline"
+            val quality = if (v.quality >= Voice.QUALITY_HIGH) " · alta qualità" else ""
+            "Voce ${i + 1} · $where$quality  (${v.name})"
+        }
+        val saved = Prefs.ttsVoice(this)
+        val selected = voices.indexOfFirst { it.name == saved }.let { if (it < 0) 0 else it + 1 }
+        bindSpinner(voiceSpinner, labels, selected) { i ->
+            val name = if (i == 0) null else voices.getOrNull(i - 1)?.name
+            if (name != Prefs.ttsVoice(this)) saveVoice(Prefs.ttsEngine(this) ?: t.defaultEngine, name)
+        }
+        voiceInfo = when {
+            voices.isEmpty() -> "Questo motore non ha voci italiane installate: scaricale o scegli un altro motore."
+            else -> "${voices.size} voci italiane disponibili. Le voci «serve internet» funzionano solo online."
+        }
+        refresh()
+    }
+
+    /** Spinner che chiama [onPick] solo quando l'utente cambia davvero la scelta. */
+    private fun bindSpinner(sp: Spinner, items: List<String>, selected: Int, onPick: (Int) -> Unit) {
+        val adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, items)
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        sp.onItemSelectedListener = null
+        sp.adapter = adapter
+        sp.setSelection(selected, false)
+        sp.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) = onPick(position)
+            override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+    }
+
+    private fun saveVoice(engine: String?, voice: String?) {
+        Prefs.setTts(this, engine, voice, currentRate())
+        // il servizio ricarica la voce subito, senza fermare l'ascolto
+        WakeService.reload(this)
+    }
+
+    private fun testVoice() {
+        val t = preview ?: return
+        val name = Prefs.ttsVoice(this)
+        val v = voices.firstOrNull { it.name == name } ?: voices.firstOrNull { !it.isNetworkConnectionRequired }
+        t.language = java.util.Locale.ITALY
+        if (v != null) t.voice = v
+        t.setSpeechRate(currentRate())
+        t.speak("Ciao, sono il tuo assistente. Chiamo Mario Rossi in vivavoce.", TextToSpeech.QUEUE_FLUSH, null, "prova")
     }
 
     // ---- frase di attivazione ----
@@ -232,14 +403,24 @@ class MainActivity : Activity() {
         ).joinToString("\n")
         status.text = AssistantBus.serviceStatus
         val h = AssistantBus.wakeHeard
-        heard.visibility = if (WakeService.running) View.VISIBLE else View.GONE
         heard.text = if (h.isEmpty()) "Sento: — (prova a dire la frase)" else "Sento: «$h»"
-        toggle.text = if (WakeService.running) "Ferma ascolto" else "Avvia ascolto"
+        val activation = Prefs.activation(this)
+        toggle.visibility = if (activation == Prefs.Activation.GESTURE) View.GONE else View.VISIBLE
+        toggle.text = if (WakeService.running && Prefs.voiceWake(this)) "Ferma ascolto" else "Avvia ascolto"
+        heard.visibility = if (WakeService.running && Prefs.voiceWake(this)) View.VISIBLE else View.GONE
+        val needsAssistant = activation != Prefs.Activation.VOICE
+        assistSet.visibility = if (needsAssistant) View.VISIBLE else View.GONE
+        assistInfo.visibility = if (needsAssistant) View.VISIBLE else View.GONE
+        assistInfo.text = if (isAssistant()) {
+            "✓ È l'assistente del telefono: tieni premuto il tasto di accensione (o fai il gesto " +
+                "dell'assistente dall'angolo in basso). Funziona anche a schermo bloccato."
+        } else {
+            "✗ Non è ancora l'assistente del telefono: tocca il pulsante e scegli «${getString(R.string.app_name)}» " +
+                "come «App assistente digitale». Nota: finché è scelta questa app, «Ok Google» non risponde."
+        }
         asrInfo.text = asrDescription()
         downloadIt.visibility = if (Prefs.systemAsr(this)) View.VISIBLE else View.GONE
-        ttsInfo.text = AssistantBus.ttsStatus.ifEmpty {
-            if (WakeService.running) "Controllo la voce…" else "Avvia l'ascolto per controllare la voce."
-        }
+        ttsInfo.text = listOf(voiceInfo, AssistantBus.ttsStatus).filter { it.isNotEmpty() }.joinToString("\n")
         findViewById<TextView>(R.id.howto).text = getString(R.string.howto, Prefs.wakePhrase(this))
     }
 }

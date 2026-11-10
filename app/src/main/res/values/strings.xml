@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Assistente Vocale</string>
-    <string name="howto">Di\' «%1$s», aspetta il segnale acustico e poi parla.\n\n• «chiama Mario Rossi»\n• «chiama mamma sul cellulare»\n• «chiama Luca in vivavoce»\n• «chiama il numero tre tre tre…»\n• «portami a Catania»\n• «naviga verso via Etnea centoventi»\n• «portami a casa» / «al lavoro»\n• «annulla» per chiudere</string>
+    <string name="howto">Di\' «%1$s», aspetta il segnale acustico e poi parla.\n\n• «chiama Mario Rossi»\n• «chiama mamma sul cellulare»\n• «chiama Luca in vivavoce»\n• «chiama il numero tre tre tre…»\n• «portami a Catania»\n• «naviga verso via Etnea centoventi»\n• «portami a casa» / «al lavoro»\n• «metti Albachiara da Spotify»\n• «metti l\'album Nevermind» / «la playlist Relax»\n• «annulla» per chiudere</string>
 </resources>

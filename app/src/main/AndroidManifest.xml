@@ -33,6 +33,7 @@
             <action android:name="android.speech.RecognitionService" />
         </intent>
         <package android:name="com.google.android.apps.maps" />
+        <package android:name="com.spotify.music" />
         <intent>
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="geo" />
@@ -70,6 +71,38 @@
             android:name=".WakeService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- attivazione con tasto/gesto: l'app può essere scelta come "Assistente digitale" -->
+        <service
+            android:name=".AssistService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_VOICE_INTERACTION">
+            <meta-data
+                android:name="android.voice_interaction"
+                android:resource="@xml/assist_service" />
+            <intent-filter>
+                <action android:name="android.service.voice.VoiceInteractionService" />
+            </intent-filter>
+        </service>
+
+        <service
+            android:name=".AssistSessionService"
+            android:exported="true"
+            android:permission="android.permission.BIND_VOICE_INTERACTION" />
+
+        <!-- obbligatorio per un assistente: inoltra al riconoscitore Google -->
+        <service
+            android:name=".RecognizerProxyService"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.speech.RecognitionService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.speech"
+                android:resource="@xml/recognition_service" />
+        </service>
 
         <receiver
             android:name=".BootReceiver"
