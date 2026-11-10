@@ -28,6 +28,26 @@
             android:textSize="16sp" />
 
         <TextView
+            android:id="@+id/version_info"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:textColor="@color/text_dim"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/update"
+            android:layout_width="match_parent"
+            android:layout_height="56dp"
+            android:layout_marginTop="8dp"
+            android:backgroundTint="@color/working"
+            android:text="Aggiorna"
+            android:textAllCaps="false"
+            android:textColor="@color/text"
+            android:textSize="16sp"
+            android:visibility="gone" />
+
+        <TextView
             android:id="@+id/heard"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

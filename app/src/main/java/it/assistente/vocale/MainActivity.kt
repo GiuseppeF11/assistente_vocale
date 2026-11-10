@@ -54,6 +54,12 @@ class MainActivity : Activity() {
     private lateinit var fbVibrate: Switch
     private lateinit var spotifyInfo: TextView
     private val feedbackPreview by lazy { Feedback(this) }
+    private lateinit var versionInfo: TextView
+    private lateinit var updateButton: Button
+    private var release: Updater.Release? = null
+    private var checkedUpdates = false
+    private var checkFailed = false
+    private var downloading = false
     private var languageInfo = ""
     private var voiceInfo = ""
 
@@ -95,6 +101,9 @@ class MainActivity : Activity() {
         voiceSpinner = findViewById(R.id.tts_voice)
         rateBar = findViewById(R.id.tts_rate)
         rateLabel = findViewById(R.id.tts_rate_label)
+        versionInfo = findViewById(R.id.version_info)
+        updateButton = findViewById(R.id.update)
+        updateButton.setOnClickListener { startUpdate() }
         setupActivation()
         setupVoice()
         setupFeedback()
@@ -155,7 +164,47 @@ class MainActivity : Activity() {
             WakeService.start(this)
         }
         checkItalianOffline()
+        checkUpdates()
         refresh()
+    }
+
+    // ---- aggiornamenti ----
+
+    private fun checkUpdates() {
+        if (checkedUpdates || downloading) return
+        checkedUpdates = true
+        Thread {
+            val r = Updater.latest()
+            runOnUiThread {
+                checkFailed = r == null
+                release = r?.takeIf { it.versionCode > Updater.installedVersion(this) }
+                refresh()
+            }
+        }.start()
+    }
+
+    private fun startUpdate() {
+        val r = release ?: return
+        // la prima volta Android chiede di consentire l'installazione da questa app
+        if (!packageManager.canRequestPackageInstalls()) {
+            AssistantBus.update("Consenti «Installa app sconosciute» per Assistente Vocale, poi torna qui e premi di nuovo Aggiorna.")
+            open(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
+            return
+        }
+        downloading = true
+        updateButton.isEnabled = false
+        AssistantBus.update("Scarico ${r.name}…")
+        Thread {
+            try {
+                val apk = Updater.download(this, r) { pct -> AssistantBus.update("Scarico ${r.name}… $pct%") }
+                AssistantBus.update("Installo… conferma quando Android te lo chiede.")
+                Updater.install(this, apk)
+            } catch (e: Exception) {
+                AssistantBus.update("Aggiornamento non riuscito: ${e.message}")
+            } finally {
+                runOnUiThread { downloading = false; updateButton.isEnabled = true }
+            }
+        }.start()
     }
 
     override fun onPause() {
@@ -496,6 +545,19 @@ class MainActivity : Activity() {
             line(battery, "Nessun risparmio batteria sull'app"),
         ).joinToString("\n")
         status.text = AssistantBus.serviceStatus
+        val r = release
+        updateButton.visibility = if (r != null) View.VISIBLE else View.GONE
+        updateButton.text = if (r != null) "⬇  Aggiorna a ${r.name.removePrefix("Versione ")}" else "Aggiorna"
+        versionInfo.text = buildString {
+            append("Versione ${Updater.installedName(this@MainActivity)}")
+            when {
+                r != null -> append(" · nuova versione disponibile")
+                checkFailed -> append(" · non riesco a controllare gli aggiornamenti")
+                checkedUpdates && !downloading -> append(" · aggiornata")
+            }
+            if (r != null && r.notes.isNotBlank()) append("\nNovità: ").append(r.notes.lineSequence().first())
+            if (AssistantBus.updateStatus.isNotEmpty()) append("\n").append(AssistantBus.updateStatus)
+        }
         val h = AssistantBus.wakeHeard
         heard.text = if (h.isEmpty()) "Sento: — (prova a dire la frase)" else "Sento: «$h»"
         val activation = Prefs.activation(this)

@@ -5,6 +5,22 @@ Assistente vocale leggero: **chiamare**, **avviare la navigazione**, **mettere m
 Frase di attivazione riconosciuta da Vosk, sempre in locale. I comandi li capisce il riconoscitore
 vocale del telefono (Google, sul dispositivo e offline quando l'italiano è scaricato), con Vosk come riserva.
 
+## Installare e aggiornare
+
+**Dal telefono**, apri questo link e installa il file scaricato (consenti le «origini sconosciute»):
+
+**https://github.com/GiuseppeF11/assistente_vocale/releases/latest/download/AssistenteVocale.apk**
+
+Oppure inquadra il QR code:
+
+![QR per installare](docs/installa-qr.png)
+
+**Aggiornamenti**: a ogni modifica GitHub compila e pubblica una nuova versione. Aprendo l'app compare
+il pulsante verde **«Aggiorna a 1.N»**: un tocco, scarica e installa (la prima volta Android chiede di
+consentire «Installa app sconosciute» per l'app; dalla seconda in poi su Android 12+ può aggiornare senza
+altre conferme). Dopo l'aggiornamento, se l'ascolto a voce era attivo, una notifica invita a riaprire l'app.
+Internet serve solo per questo controllo: il riconoscimento vocale resta sul telefono.
+
 ## Come funziona
 
 1. Un servizio in primo piano tiene aperto il microfono e aspetta la frase di attivazione

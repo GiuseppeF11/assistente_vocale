@@ -387,12 +387,12 @@ object Notifications {
     fun refreshService(c: Context) = nm(c).notify(ID_SERVICE, service(c))
 
     /** Dopo un riavvio Android non permette di riaccendere il microfono da soli: lo chiediamo all'utente. */
-    fun boot(c: Context) {
+    fun boot(c: Context, title: String = "Assistente vocale spento", text: String = "Tocca per riattivare l'ascolto dopo il riavvio") {
         channels(c)
         val n = Notification.Builder(c, CH_ALERT)
             .setSmallIcon(R.drawable.ic_mic)
-            .setContentTitle("Assistente vocale spento")
-            .setContentText("Tocca per riattivare l'ascolto dopo il riavvio")
+            .setContentTitle(title)
+            .setContentText(text)
             .setContentIntent(activity(c, MainActivity::class.java, 13))
             .setAutoCancel(true)
             .build()
@@ -402,7 +402,14 @@ object Notifications {
 
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED && Prefs.enabled(context)) Notifications.boot(context)
+        if (!Prefs.voiceWake(context)) return
+        when (intent.action) {
+            Intent.ACTION_BOOT_COMPLETED -> Notifications.boot(context)
+            // dopo un aggiornamento Android chiude l'app: il microfono si riattiva solo aprendola
+            Intent.ACTION_MY_PACKAGE_REPLACED -> Notifications.boot(
+                context, "Assistente aggiornato alla ${Updater.installedName(context)}", "Tocca per riattivare l'ascolto",
+            )
+        }
     }
 }
 

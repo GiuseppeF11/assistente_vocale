@@ -53,6 +53,10 @@ object AssistantBus {
     @Volatile var ttsStatus: String = ""
         private set
 
+    /** stato dell'aggiornamento dell'app */
+    @Volatile var updateStatus: String = ""
+        private set
+
     /** motore che ha capito l'ultimo comando */
     @Volatile var asrStatus: String = ""
         private set
@@ -70,6 +74,7 @@ object AssistantBus {
     fun status(text: String) { serviceStatus = text; fire() }
     fun heard(text: String) { if (text != wakeHeard) { wakeHeard = text; fire() } }
     fun tts(text: String) { ttsStatus = text; fire() }
+    fun update(text: String) { updateStatus = text; fire() }
     fun asr(text: String) { if (text != asrStatus) { asrStatus = text; fire() } }
 
     private fun fire() { main.post { listeners.forEach { it.run() } } }

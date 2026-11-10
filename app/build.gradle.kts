@@ -11,8 +11,9 @@ android {
         applicationId = "it.assistente.vocale"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        // numero della build su GitHub (1 per le build locali)
+        versionCode = providers.environmentVariable("VERSION_CODE").orNull?.toIntOrNull() ?: 1
+        versionName = "1.$versionCode"
         ndk {
             // telefoni reali + emulatore
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
