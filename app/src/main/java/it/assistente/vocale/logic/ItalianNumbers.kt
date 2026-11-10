@@ -82,8 +82,10 @@ object ItalianNumbers {
         val tokens = Text.tokens(text)
         if (tokens.isEmpty()) return null
         val sb = StringBuilder()
+        // "+39 333…" scritto in cifre dal riconoscitore
+        if (text.trimStart().startsWith("+")) sb.append('+')
         for ((i, t) in tokens.withIndex()) {
-            if (i == 0 && t == "piu") { sb.append('+'); continue }
+            if (i == 0 && t == "piu") { if (sb.isEmpty()) sb.append('+'); continue }
             if (t.all { it.isDigit() }) { sb.append(t); continue }
             val n = wordToInt(t) ?: return null
             sb.append(n)

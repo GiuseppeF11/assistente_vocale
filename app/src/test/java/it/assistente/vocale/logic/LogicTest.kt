@@ -23,6 +23,34 @@ class LogicTest {
         assertEquals(Command.CallWho, CommandParser.parse("telefona a"))
     }
 
+    @Test fun vivavoce() {
+        assertEquals(Command.Call("mario", null, true), CommandParser.parse("chiama mario in vivavoce"))
+        assertEquals(Command.Call("mamma", NumberKind.MOBILE, true), CommandParser.parse("chiama mamma sul cellulare in vivavoce"))
+        assertEquals(Command.Call("mamma", NumberKind.HOME, true), CommandParser.parse("chiama mamma col vivavoce a casa"))
+        assertEquals(Command.Call("luca", null, true), CommandParser.parse("chiama in vivavoce luca"))
+        assertEquals(Command.Call("anna", null, true), CommandParser.parse("telefona ad anna con l'altoparlante"))
+        assertTrue(CommandParser.mentionsSpeaker("il secondo in vivavoce"))
+        assertTrue(!CommandParser.mentionsSpeaker("il secondo"))
+    }
+
+    /** Il riconoscitore Google restituisce maiuscole, punteggiatura e cifre. */
+    @Test fun testoDaGoogle() {
+        assertEquals(Command.Call("mario rossi", null), CommandParser.parse("Chiama Mario Rossi."))
+        assertEquals(Command.Navigate("via etnea 120 catania"), CommandParser.parse("Portami a Via Etnea 120, Catania"))
+        assertEquals(Command.Call("avvocato", null), CommandParser.parse("Chiama l’avvocato"))
+        assertEquals(Command.Cancel, CommandParser.parse("Annulla!"))
+        assertEquals("+393331234567", ItalianNumbers.phoneDigits("+39 333 1234567"))
+        assertEquals("3331234567", ItalianNumbers.phoneDigits("333-123-4567"))
+        assertEquals(Command.Call("333 123 4567", null), CommandParser.parse("chiama il 333 123 4567"))
+    }
+
+    @Test fun fraseDiAttivazione() {
+        assertEquals("ehi computer", Text.spoken("Ehi, Computer!"))
+        assertEquals("perché no", Text.spoken("  Perché   no? "))
+        assertEquals("giusepe", Text.phonetic("giuseppe"))
+        assertEquals("cristian", Text.phonetic("christian"))
+    }
+
     @Test fun navigazione() {
         assertEquals(Command.Navigate("catania"), CommandParser.parse("portami a catania"))
         assertEquals(Command.Navigate("via etnea 120 catania"), CommandParser.parse("naviga verso via etnea cento venti catania"))
@@ -73,13 +101,15 @@ class LogicTest {
     private fun c(name: String) = Contact(name, listOf(PhoneNumber("1", "Cellulare", NumberKind.MOBILE)))
     private val rubrica = listOf(
         c("Mario Rossi"), c("Mario Bianchi"), c("Maria Bianchi"), c("Mamma"),
-        c("Mamma Lavoro"), c("Giuseppe Verdi"), c("Dott. D'Angelo"), c("Luca"),
+        c("Mamma Lavoro"), c("Giuseppe Verdi"), c("Dott. D'Angelo"), c("Luca"), c("Christian"),
     )
 
     @Test fun contattoUnico() {
         assertEquals(Match.One(rubrica[0]), ContactMatcher.find("mario rossi", rubrica))
         assertEquals(Match.One(rubrica[3]), ContactMatcher.find("mamma", rubrica))
         assertEquals(Match.One(rubrica[5]), ContactMatcher.find("giuseppe", rubrica))
+        assertEquals(Match.One(rubrica[5]), ContactMatcher.find("giusepe", rubrica))
+        assertEquals(Match.One(rubrica[8]), ContactMatcher.find("cristian", rubrica))
         // errore di riconoscimento di una lettera
         assertEquals(Match.One(rubrica[5]), ContactMatcher.find("giuseppe verde", rubrica))
         assertEquals(Match.One(rubrica[6]), ContactMatcher.find("d'angelo", rubrica))

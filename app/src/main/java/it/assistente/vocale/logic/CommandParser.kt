@@ -1,7 +1,7 @@
 package it.assistente.vocale.logic
 
 sealed interface Command {
-    data class Call(val target: String, val kind: NumberKind?) : Command
+    data class Call(val target: String, val kind: NumberKind?, val speaker: Boolean = false) : Command
     /** "chiama" senza dire chi */
     data object CallWho : Command
     data class Navigate(val destination: String) : Command
@@ -43,6 +43,13 @@ object CommandParser {
     private val navLead = Regex(
         "^(?:verso|fino|per|ad|a|al|allo|alla|ai|agli|alle|in|da|dal|dalla|nel|nella)\\s+"
     )
+    private val speakerSuffix = Regex(
+        "\\s+(?:in |con il |con l'|con |col |sul |usando il |usando l')?(?:vivavoce|viva voce|altoparlante)$"
+    )
+    private val speakerPrefix = Regex("^(?:in|con il|col|con l') ?(?:vivavoce|viva voce|altoparlante)\\s+")
+    private val speakerWords = Regex("\\b(?:vivavoce|viva voce|altoparlante)\\b")
+    private val punctuation = Regex("[^\\p{L}\\p{N}'+ ]+")
+
     private val kindSuffix = Regex(
         "\\s+(?:sul|al|a|in|nel)\\s+(cellulare|telefonino|mobile|casa|fisso|lavoro|ufficio)$"
     )
@@ -53,8 +60,8 @@ object CommandParser {
         if (cancelRe.matches(text)) return Command.Cancel
 
         callRe.find(text)?.let { m ->
-            val (target, kind) = callTarget(m.groupValues[1])
-            return if (target.isEmpty()) Command.CallWho else Command.Call(target, kind)
+            val t = callTarget(m.groupValues[1])
+            return if (t.target.isEmpty()) Command.CallWho else Command.Call(t.target, t.kind, t.speaker)
         }
         navRe.find(text)?.let { m ->
             val dest = destination(m.groupValues[1])
@@ -63,17 +70,31 @@ object CommandParser {
         return Command.Unknown(text)
     }
 
-    /** Ripulisce "a mario rossi sul cellulare" -> ("mario rossi", MOBILE). */
-    fun callTarget(raw: String): Pair<String, NumberKind?> {
+    data class CallTarget(val target: String, val kind: NumberKind?, val speaker: Boolean)
+
+    /** Ripulisce "a mario rossi sul cellulare in vivavoce" -> ("mario rossi", MOBILE, vivavoce). */
+    fun callTarget(raw: String): CallTarget {
         var t = clean(raw)
         var kind: NumberKind? = null
-        kindSuffix.find(t)?.let { m ->
-            kind = kindOf(listOf(m.groupValues[1]))
-            t = t.removeRange(m.range).trim()
+        var speaker = false
+        speakerPrefix.find(t)?.let { m -> speaker = true; t = t.removeRange(m.range).trim() }
+        // i suffissi possono comparire in qualunque ordine: "sul cellulare in vivavoce"
+        var changed = true
+        while (changed) {
+            changed = false
+            speakerSuffix.find(t)?.let { m -> speaker = true; t = t.removeRange(m.range).trim(); changed = true }
+            kindSuffix.find(t)?.let { m ->
+                kind = kindOf(listOf(m.groupValues[1]))
+                t = t.removeRange(m.range).trim()
+                changed = true
+            }
         }
         t = stripLeading(t, callLead, callLeadApostrophe)
-        return t to kind
+        return CallTarget(t, kind, speaker)
     }
+
+    /** "il secondo in vivavoce", "sì col vivavoce" */
+    fun mentionsSpeaker(raw: String): Boolean = speakerWords.containsMatchIn(clean(raw))
 
     /** Ripulisce "fino a via etnea cento venti" -> "via etnea 120". */
     fun destination(raw: String): String {
@@ -89,7 +110,8 @@ object CommandParser {
     }
 
     private fun clean(raw: String): String {
-        var t = raw.lowercase().replace("[unk]", " ").replace(Regex("\\s+"), " ").trim()
+        var t = raw.lowercase().replace('’', '\'').replace("[unk]", " ")
+        t = punctuation.replace(t, " ").replace(Regex("\\s+"), " ").trim()
         while (true) {
             val next = trailingPolite.replace(t, "")
             if (next == t) break

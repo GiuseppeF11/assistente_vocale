@@ -55,7 +55,7 @@ object ContactMatcher {
     }
 
     private fun best(token: String, others: List<String>): Double {
-        val s = others.maxOf { Text.similarity(token, it) }
+        val s = others.maxOf { Text.soundsLike(token, it) }
         return if (s < TOKEN_FLOOR) 0.0 else s
     }
 }

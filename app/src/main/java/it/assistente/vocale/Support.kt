@@ -10,8 +10,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.ContactsContract.CommonDataKinds.Phone
 import android.telecom.TelecomManager
 import android.util.Log
@@ -34,6 +37,20 @@ object Prefs {
     fun enabled(c: Context) = sp(c).getBoolean("enabled", false)
     fun setEnabled(c: Context, v: Boolean) = sp(c).edit().putBoolean("enabled", v).apply()
 
+    const val DEFAULT_WAKE = "ciao assistente"
+
+    fun wakePhrase(c: Context): String =
+        Text.spoken(sp(c).getString("wake", DEFAULT_WAKE)!!).ifEmpty { DEFAULT_WAKE }
+    fun setWakePhrase(c: Context, v: String) = sp(c).edit().putString("wake", Text.spoken(v)).apply()
+
+    /** chiamate sempre in vivavoce */
+    fun speaker(c: Context) = sp(c).getBoolean("speaker", false)
+    fun setSpeaker(c: Context, v: Boolean) = sp(c).edit().putBoolean("speaker", v).apply()
+
+    /** riconoscimento dei comandi con il motore del telefono (Google) invece di Vosk */
+    fun systemAsr(c: Context) = sp(c).getBoolean("system_asr", true)
+    fun setSystemAsr(c: Context, v: Boolean) = sp(c).edit().putBoolean("system_asr", v).apply()
+
     fun home(c: Context): String = sp(c).getString("home", "")!!.trim()
     fun work(c: Context): String = sp(c).getString("work", "")!!.trim()
     fun setPlaces(c: Context, home: String, work: String) =
@@ -46,6 +63,7 @@ object Prefs {
 object ModelInstaller {
     private const val ASSET_DIR = "model-it"
 
+    @Synchronized
     fun ensure(c: Context): String {
         val target = File(c.filesDir, ASSET_DIR)
         val marker = File(target, ".installed")
@@ -59,6 +77,24 @@ object ModelInstaller {
         copy(c, ASSET_DIR, target)
         marker.writeText(stamp)
         return target.absolutePath
+    }
+
+    /**
+     * Parole della frase che il modello non conosce (Vosk le ignorerebbe e la frase non scatterebbe mai).
+     * null se il modello non include l'elenco delle parole.
+     */
+    fun missingWords(c: Context, words: List<String>): List<String>? {
+        val vocab = File(ensure(c), "graph/words.txt")
+        if (!vocab.exists()) return null
+        val wanted = words.toMutableSet()
+        vocab.bufferedReader().useLines { lines ->
+            for (line in lines) {
+                val w = line.substringBefore(' ')
+                wanted.remove(w)
+                if (wanted.isEmpty()) break
+            }
+        }
+        return words.filter { it in wanted }
     }
 
     private fun copy(c: Context, assetPath: String, dest: File) {
@@ -114,16 +150,40 @@ object ContactsRepository {
 object Actions {
 
     /** Avvia la chiamata tramite il sistema: funziona anche a schermo bloccato. */
-    fun call(c: Context, number: String): Boolean {
+    fun call(c: Context, number: String, speaker: Boolean): Boolean {
         if (!c.granted(Manifest.permission.CALL_PHONE)) return false
         return try {
+            val extras = Bundle().apply { putBoolean(TelecomManager.EXTRA_START_CALL_WITH_SPEAKERPHONE, speaker) }
             c.getSystemService(TelecomManager::class.java)
-                .placeCall(Uri.fromParts("tel", number, null), Bundle())
+                .placeCall(Uri.fromParts("tel", number, null), extras)
+            if (speaker) ensureSpeaker(c)
             true
         } catch (e: Exception) {
             Log.e(TAG, "Chiamata non riuscita", e)
             false
         }
+    }
+
+    /**
+     * Ripiego per i telefoni che ignorano la richiesta di vivavoce: appena la chiamata è attiva
+     * accende l'altoparlante (una volta sola, così l'utente può poi spegnerlo).
+     */
+    @Suppress("DEPRECATION")
+    private fun ensureSpeaker(c: Context) {
+        val am = c.getSystemService(AudioManager::class.java)
+        val main = Handler(Looper.getMainLooper())
+        var tries = 0
+        val check = object : Runnable {
+            override fun run() {
+                val inCall = am.mode == AudioManager.MODE_IN_CALL || am.mode == AudioManager.MODE_IN_COMMUNICATION
+                if (inCall) {
+                    if (!am.isSpeakerphoneOn) am.isSpeakerphoneOn = true
+                } else if (++tries < 15) {
+                    main.postDelayed(this, 600)
+                }
+            }
+        }
+        main.postDelayed(check, 800)
     }
 
     /** Apre la navigazione guidata; va chiamata da una Activity a telefono sbloccato. */
@@ -176,7 +236,7 @@ object Notifications {
         return Notification.Builder(c, CH_SERVICE)
             .setSmallIcon(R.drawable.ic_mic)
             .setContentTitle("Assistente in ascolto")
-            .setContentText("Di' «${WakeService.WAKE_PHRASE}»")
+            .setContentText("Di' «${Prefs.wakePhrase(c)}»")
             .setOngoing(true)
             .setContentIntent(activity(c, MainActivity::class.java, 11))
             .addAction(Notification.Action.Builder(null, "Ferma", stop).build())
@@ -203,6 +263,8 @@ object Notifications {
     }
 
     fun cancelWake(c: Context) = nm(c).cancel(ID_WAKE)
+
+    fun refreshService(c: Context) = nm(c).notify(ID_SERVICE, service(c))
 
     /** Dopo un riavvio Android non permette di riaccendere il microfono da soli: lo chiediamo all'utente. */
     fun boot(c: Context) {

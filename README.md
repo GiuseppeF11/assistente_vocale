@@ -1,11 +1,13 @@
 # Assistente Vocale (Android, offline)
 
 Assistente vocale leggero che fa due cose: **chiamare** e **avviare la navigazione**.
-Riconoscimento vocale interamente sul telefono (Vosk), nessun server, nessuna libreria oltre a Vosk.
+Frase di attivazione riconosciuta da Vosk, sempre in locale. I comandi li capisce il riconoscitore
+vocale del telefono (Google, sul dispositivo e offline quando l'italiano è scaricato), con Vosk come riserva.
 
 ## Come funziona
 
-1. Un servizio in primo piano tiene aperto il microfono e aspetta **«ciao assistente»**.
+1. Un servizio in primo piano tiene aperto il microfono e aspetta la frase di attivazione
+   (predefinita **«ciao assistente»**, modificabile nell'app).
 2. Alla parola di attivazione: segnale acustico, lo schermo si accende e compare la schermata
    dell'assistente (anche sopra il blocco schermo) con il microfono che pulsa.
 3. Mentre parli, il testo capito compare parola per parola.
@@ -19,6 +21,7 @@ Riconoscimento vocale interamente sul telefono (Vosk), nessun server, nessuna li
 | «chiama Mario» (due Mario in rubrica) | «Ho trovato Mario Rossi o Mario Bianchi. Quale?» |
 | «chiama mamma» (più numeri, nessun predefinito) | «Mamma ha più numeri: cellulare o casa?» |
 | «chiama mamma sul cellulare» | chiama direttamente il cellulare |
+| «chiama Luca in vivavoce» | chiama con l'altoparlante (o attiva «sempre in vivavoce» nell'app) |
 | «chiama il numero tre tre tre uno due…» | chiama il numero dettato |
 | «chiama» | «Chi vuoi chiamare?» |
 | «portami a Catania» / «naviga verso via Etnea centoventi» | apre la navigazione guidata |
@@ -51,6 +54,16 @@ modifica compila da solo l'APK. Si scarica da **Actions → ultima esecuzione �
 AssistenteVocale-apk** (uno zip con dentro `app-debug.apk`), poi si copia sul telefono e si installa
 consentendo le «origini sconosciute».
 
+## Se non capisce
+
+- **Frase di attivazione**: nell'app, con l'ascolto attivo, la riga «Sento: …» mostra cosa riconosce
+  il rilevatore. Se non compare niente o solo una parola, scegli un'altra frase (due parole, comuni
+  ma insolite insieme). Il salvataggio rifiuta le parole che il modello non conosce.
+- **Comandi**: tieni attivo «Usa il riconoscimento del telefono» e premi «Scarica l'italiano offline».
+  Sotto compare quale motore ha capito l'ultimo comando.
+- **Voce**: se manca la voce italiana l'assistente resta muto (meglio che parlare con pronuncia
+  inglese): «Installa / aggiorna la voce italiana».
+
 ## Struttura
 
 ```
@@ -69,8 +82,8 @@ app/src/main/java/it/assistente/vocale/
 Per aggiungere un comando: un nuovo caso in `Command` + regex in `CommandParser`,
 poi il ramo corrispondente in `WakeService.onFinal`.
 
-Parola di attivazione: costante `WAKE_PHRASE` in `WakeService`. Deve essere fatta di parole
-italiane comuni (devono esistere nel vocabolario del modello).
+Frase di attivazione: si imposta dall'app (`Prefs.wakePhrase`); le parole devono esistere nel
+vocabolario del modello Vosk (`graph/words.txt`).
 
 ## Limiti da conoscere
 
@@ -82,7 +95,9 @@ italiane comuni (devono esistere nel vocabolario del modello).
 - **Batteria e privacy.** Il microfono resta sempre attivo: pallino verde fisso e consumo
   continuo. Su Xiaomi, Samsung, Oppo ecc. va disattivato il risparmio batteria per l'app,
   altrimenti il sistema la chiude.
-- **Nomi difficili.** Il modello piccolo sbaglia più facilmente cognomi rari e località
-  straniere. La ricerca in rubrica tollera una o due lettere sbagliate; se non trova, chiede.
+- **Nomi difficili.** Al riconoscitore del telefono vengono suggeriti i nomi della rubrica, e la
+  ricerca tollera lettere sbagliate e differenze di pronuncia (Christian/Cristian); se non trova, chiede.
+- **Vivavoce.** Si chiede al sistema di avviare la chiamata in vivavoce; se il telefono lo ignora,
+  l'app accende l'altoparlante appena la chiamata parte. Su alcuni modelli può non funzionare.
 - **Navigazione offline** solo se in Google Maps hai scaricato le mappe della zona.
 - **Volume.** Segnale acustico e voce usano il volume multimediale.
