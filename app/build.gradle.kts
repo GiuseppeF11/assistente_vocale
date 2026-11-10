@@ -19,7 +19,20 @@ android {
         }
     }
 
+    // chiave fissa: ogni APK compilato su GitHub si installa sopra il precedente senza disinstallare
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
+        }
         release {
             isMinifyEnabled = false
         }
