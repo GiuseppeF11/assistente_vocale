@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioRecord
@@ -41,6 +42,7 @@ import it.assistente.vocale.logic.Match
 import it.assistente.vocale.logic.NumberKind
 import it.assistente.vocale.logic.PhoneNumber
 import it.assistente.vocale.logic.PlayRequest
+import it.assistente.vocale.logic.SpotifyItem
 import it.assistente.vocale.logic.Text
 import it.assistente.vocale.logic.TimeParser
 import it.assistente.vocale.logic.MediaFocus
@@ -118,6 +120,8 @@ class WakeService : Service(), AssistantBus.Controller {
         data object WhatToPlay : Pending
         data object AlarmWhen : Pending
         data object TimerHowLong : Pending
+        /** in auto: conferma a voce prima di chiamare o navigare */
+        class Confirm(val action: () -> Unit) : Pending
         data class PickContact(val candidates: List<Contact>, val kind: NumberKind?) : Pending
         data class PickNumber(val contact: Contact, val numbers: List<PhoneNumber>) : Pending
     }
@@ -166,6 +170,10 @@ class WakeService : Service(), AssistantBus.Controller {
     private val overlay by lazy { AssistantOverlay(this) }
     /** il dialogo è mostrato dalla sessione dell'assistente di sistema (tasto/gesto) */
     private var sessionUi = false
+    /** modalità auto: niente schermo, tutto a voce */
+    private var carMode = false
+    private var focusRequest: AudioFocusRequest? = null
+    private var navConfirmed = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -263,6 +271,7 @@ class WakeService : Service(), AssistantBus.Controller {
         running = false
         main.removeCallbacksAndMessages(null)
         destroySystemRecognizer()
+        releaseAudioFocus()
         overlay.remove()
         audioThread?.join(800)
         tts?.shutdown()
@@ -337,6 +346,12 @@ class WakeService : Service(), AssistantBus.Controller {
         val id = "u${++utteranceSeq}"
         afterSpeech = if (then != null) id to then else null
         val t = tts
+        t?.setAudioAttributes(
+            AudioAttributes.Builder()
+                .setUsage(if (carMode) AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE else AudioAttributes.USAGE_ASSISTANT)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                .build()
+        )
         if (t == null || !ttsReady || t.speak(text, TextToSpeech.QUEUE_FLUSH, null, id) != TextToSpeech.SUCCESS) {
             speechFinished(id)
             return
@@ -738,10 +753,16 @@ class WakeService : Service(), AssistantBus.Controller {
         pending = Pending.Fresh
         misunderstandings = 0
         speakerRequested = false
+        carMode = CarMode.isActive(this)
         refreshContacts()
+        grabAudioFocus()
         AssistantBus.post(UiState(Phase.LISTENING, "Ti ascolto…"))
-        // con il tasto/gesto il popup lo mostra la sessione dell'assistente
-        if (sessionUi) overlay.remove() else showScreen()
+        // con il tasto/gesto il popup lo mostra la sessione dell'assistente; in auto lo schermo non si guarda
+        when {
+            sessionUi -> overlay.remove()
+            carMode -> Unit
+            else -> showScreen()
+        }
         listen("Ti ascolto…", emptyList())
     }
 
@@ -766,6 +787,16 @@ class WakeService : Service(), AssistantBus.Controller {
 
         val cmd = CommandParser.parse(text)
         if (cmd is Command.Cancel) { finish("Annullato.", error = false); return }
+
+        // in auto, risposta a "Chiamo Mario Rossi, confermi?"
+        (pending as? Pending.Confirm)?.let { c ->
+            when (ChoiceParser.yesNo(text)) {
+                true -> { pending = Pending.Fresh; c.action(); return }
+                false -> { finish("Annullato.", error = false); return }
+                // "no, Mario Bianchi" o un comando nuovo: si riparte da capo
+                null -> pending = Pending.Fresh
+            }
+        }
 
         when (val p = pending) {
             Pending.Fresh -> when (cmd) {
@@ -819,6 +850,8 @@ class WakeService : Service(), AssistantBus.Controller {
                     else ask("Non ho capito. Per quanto tempo?", Pending.TimerHowLong, misunderstood = true)
                 }
             }
+
+            is Pending.Confirm -> Unit // gestito sopra
 
             Pending.WhatToPlay -> when (cmd) {
                 is Command.Play -> play(cmd.request)
@@ -880,6 +913,7 @@ class WakeService : Service(), AssistantBus.Controller {
             Pending.AlarmWhen -> best { if (TimeParser.clock(it) != null) 1 else 0 }
             Pending.TimerHowLong -> best { if (TimeParser.duration(it) != null) 1 else 0 }
             Pending.WhereToGo, Pending.WhatToPlay -> texts[0]
+            is Pending.Confirm -> best { if (ChoiceParser.yesNo(it) != null) 1 else 0 }
         }
     }
 
@@ -939,16 +973,22 @@ class WakeService : Service(), AssistantBus.Controller {
     private fun numberQuestion(contact: Contact, numbers: List<PhoneNumber>): String {
         val labels = numbers.map { it.label.lowercase() }
         return if (labels.distinct().size == labels.size) "${contact.name} ha più numeri: ${orList(labels)}?"
+        else if (carMode) "${contact.name} ha più numeri. Dimmi il primo o il secondo."
         else "${contact.name} ha più numeri. Dimmi il primo, il secondo, oppure toccane uno."
     }
 
     private fun numberOptions(numbers: List<PhoneNumber>) = numbers.map { "${it.label} · ${it.number}" }
 
-    private fun call(number: String, spokenLabel: String) {
+    private fun call(number: String, spokenLabel: String, confirmed: Boolean = false) {
         if (!granted(Manifest.permission.CALL_PHONE)) {
             finish("Manca il permesso per effettuare chiamate.", error = true); return
         }
-        val speaker = Prefs.speaker(this) || speakerRequested
+        if (carMode && Prefs.carConfirm(this) && !confirmed) {
+            ask("Chiamo $spokenLabel, confermi?", Pending.Confirm { call(number, spokenLabel, confirmed = true) })
+            return
+        }
+        // in auto l'audio va già all'impianto della macchina
+        val speaker = !carMode && (Prefs.speaker(this) || speakerRequested)
         val label = if (speaker) "$spokenLabel in vivavoce" else spokenLabel
         pending = Pending.Fresh
         mode = Mode.PAUSED
@@ -988,6 +1028,11 @@ class WakeService : Service(), AssistantBus.Controller {
                 }
             }
         }
+        if (carMode && Prefs.carConfirm(this) && !navConfirmed) {
+            ask("Navigo verso $shown, confermi?", Pending.Confirm { navConfirmed = true; navigate(rawDestination) })
+            return
+        }
+        navConfirmed = false
         speak("Avvio la navigazione verso $shown")
         launchApp(AssistantBus.Launch.Navigate(destination), "Navigazione verso $shown", "Nessuna app di navigazione trovata.")
     }
@@ -1030,28 +1075,50 @@ class WakeService : Service(), AssistantBus.Controller {
         if (!Actions.spotifyInstalled(this)) {
             finish("Spotify non è installato.", error = true); return
         }
-        val what = when (req.focus) {
-            MediaFocus.ALBUM -> "l'album ${req.query}"
-            MediaFocus.PLAYLIST -> "la playlist ${req.query}"
-            else -> req.query
+        if (!SpotifyAccount.isLinked(this)) {
+            spotifySearchFallback(req, "Per far partire la musica da sola collega Spotify nelle impostazioni dell'app.")
+            return
         }
-        AssistantBus.post(UiState(Phase.WORKING, "Spotify: $what", transcript))
+        AssistantBus.post(UiState(Phase.WORKING, "Cerco «${req.query}» su Spotify…", transcript))
         mode = idleMode()
         val seq = actionSeq
-        speak("Metto $what su Spotify") {
+        Thread({
+            val token = SpotifyAccount.accessToken(this)
+            val item = token?.let { runCatching { SpotifyAccount.search(it, req) }.getOrNull() }
+            main.post {
+                if (!alive || seq != actionSeq) return@post
+                when {
+                    token == null -> spotifySearchFallback(req, "Non riesco a collegarmi a Spotify (internet o account da ricollegare).")
+                    item == null -> finish("Non ho trovato «${req.query}» su Spotify.", error = true)
+                    else -> playItem(item, req, seq)
+                }
+            }
+        }, "assistente-spotify").start()
+    }
+
+    private fun playItem(item: SpotifyItem, req: PlayRequest, seq: Int) {
+        AssistantBus.post(UiState(Phase.WORKING, "Spotify: ${item.spoken()}", transcript))
+        speak("Metto ${item.spoken()}") {
             if (!alive || seq != actionSeq) return@speak
-            SpotifyPlayer.play(this, req) { result ->
+            // la musica deve poter partire: si lascia l'audio
+            releaseAudioFocus()
+            SpotifyPlayer.play(this, item) { result ->
                 if (!alive || seq != actionSeq) return@play
                 when (result) {
-                    SpotifyPlayer.Result.PLAYING -> hide()
-                    SpotifyPlayer.Result.NOT_STARTED -> launchApp(
-                        AssistantBus.Launch.Play(req),
-                        "Spotify non è partito da solo: apro la ricerca.",
-                        "Non riesco ad aprire Spotify.",
-                    )
+                    SpotifyPlayer.Result.Playing -> hide()
+                    SpotifyPlayer.Result.NeedsLink ->
+                        spotifySearchFallback(req, "Spotify chiede di nuovo il permesso: ricollegalo nelle impostazioni dell'app.")
+                    is SpotifyPlayer.Result.Failed ->
+                        spotifySearchFallback(req, "Spotify non è partito (${result.reason}).")
                 }
             }
         }
+    }
+
+    /** Ripiego: apre la ricerca su Spotify (in auto solo un avviso a voce). */
+    private fun spotifySearchFallback(req: PlayRequest, why: String) {
+        if (carMode) { finish(why, error = true); return }
+        launchApp(AssistantBus.Launch.Play(req), "$why Intanto apro la ricerca.", "Non riesco ad aprire Spotify.")
     }
 
     /**
@@ -1059,7 +1126,8 @@ class WakeService : Service(), AssistantBus.Controller {
      * Bloccato: ci pensa la schermata, che chiede lo sblocco prima di aprirla.
      */
     private fun launchApp(launch: AssistantBus.Launch, message: String, failure: String) {
-        if (!isLocked()) {
+        // in auto non si sblocca il telefono: Maps/Spotify si aprono comunque (finiscono sullo schermo dell'auto)
+        if (!isLocked() || carMode) {
             AssistantBus.post(UiState(Phase.WORKING, message, transcript))
             backToWake()
             if (Actions.run(this, launch)) {
@@ -1101,7 +1169,27 @@ class WakeService : Service(), AssistantBus.Controller {
         main.postDelayed(hideRunnable, 2500)
     }
 
+    /** Mette in pausa la musica mentre si ascolta il comando (come fa Google). */
+    private fun grabAudioFocus() {
+        if (focusRequest != null) return
+        val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+            .setAudioAttributes(
+                AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
+            )
+            .build()
+        if (getSystemService(AudioManager::class.java).requestAudioFocus(req) == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            focusRequest = req
+        }
+    }
+
+    private fun releaseAudioFocus() {
+        focusRequest?.let { getSystemService(AudioManager::class.java).abandonAudioFocusRequest(it) }
+        focusRequest = null
+    }
+
     private fun hide() {
+        releaseAudioFocus()
         actionSeq++
         main.removeCallbacks(hideRunnable)
         Notifications.cancelWake(this)

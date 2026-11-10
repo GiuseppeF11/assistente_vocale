@@ -105,14 +105,30 @@ Nell'app si scelgono motore (Google, Samsung, …), voce italiana e velocità, c
 
 ## Spotify
 
-Il comando standard di Android («cerca e riproduci») Spotify lo tratta come una semplice ricerca. L'app
-prova quindi a collegarsi al **lettore di Spotify** (MediaBrowser, come Android Auto e gli assistenti) e gli
-chiede la ricerca vocale, controllando che il brano sia davvero cambiato. Se Spotify rifiuta il collegamento,
-si apre la ricerca.
+Spotify accetta comandi di riproduzione solo dalle app registrate presso di lui. L'app usa quindi il kit
+ufficiale: una volta sola si **collega l'account** (pulsante nelle impostazioni: login Spotify nel browser,
+poi Spotify chiede il permesso di comandare la musica). Da lì:
+
+1. ricerca del brano/artista/album/playlist con la Web API di Spotify (serve internet);
+2. riproduzione con **App Remote**, che comanda l'app Spotify installata, anche a telefono bloccato e in auto.
+
+Con Premium parte il brano esatto; senza Premium Spotify non avvia singoli brani e parte l'album che lo contiene.
+App registrata su developer.spotify.com con Redirect URI `assistente-vocale://callback`, pacchetto
+`it.assistente.vocale` e l'impronta SHA1 della chiave di firma. Senza collegamento si apre la ricerca.
 
 Niente accesso alle notifiche: con quel permesso Play Protect blocca l'installazione degli APK scaricati
-dal browser («App bloccata per proteggere il tuo dispositivo», senza alternative). Lo stesso vale per
-lettura SMS e servizi di accessibilità: l'app non deve mai chiederli.
+dal browser. Lo stesso vale per lettura SMS e servizi di accessibilità: l'app non deve mai chiederli.
+
+## In auto (Android Auto)
+
+Quando il telefono è collegato ad Android Auto (rilevato da solo, oppure forzato nelle impostazioni):
+niente popup, scelte e conferme a voce («Chiamo Mario Rossi, confermi?»), voce dell'assistente sul canale
+delle indicazioni stradali (casse dell'auto, musica abbassata), Maps e Spotify aperti senza sbloccare.
+Le chiamate passano dall'impianto dell'auto. Il tasto vocale del volante apre sempre l'assistente Google:
+in auto si usa l'attivazione a voce. Un'icona sullo schermo dell'auto non è prevista (Android Auto non
+ammette assistenti di terze parti).
+
+In ogni modalità, mentre l'assistente ascolta la musica va in pausa e riprende alla fine.
 
 ## Segnale di ascolto
 

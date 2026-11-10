@@ -65,6 +65,13 @@ object Prefs {
         .putString("fb_sound", sound.name).putString("fb_uri", uri)
         .putInt("fb_volume", volume).putBoolean("fb_vibrate", vibrate).apply()
 
+    // modalità auto
+    enum class Car(val label: String) { AUTO("Automatica (quando è collegato Android Auto)"), ALWAYS("Sempre attiva"), NEVER("Disattivata") }
+    fun carMode(c: Context): Car = runCatching { Car.valueOf(sp(c).getString("car", "AUTO")!!) }.getOrDefault(Car.AUTO)
+    fun setCarMode(c: Context, v: Car) = sp(c).edit().putString("car", v.name).apply()
+    fun carConfirm(c: Context) = sp(c).getBoolean("car_confirm", true)
+    fun setCarConfirm(c: Context, v: Boolean) = sp(c).edit().putBoolean("car_confirm", v).apply()
+
     // voce dell'assistente: null = automatico
     fun ttsEngine(c: Context): String? = sp(c).getString("tts_engine", null)
     fun ttsVoice(c: Context): String? = sp(c).getString("tts_voice", null)
@@ -504,5 +511,29 @@ class Feedback(private val c: Context) {
     fun release() {
         tone?.release(); tone = null
         player?.release(); player = null
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+
+/** Il telefono è collegato ad Android Auto (o la modalità auto è forzata nelle impostazioni)? */
+object CarMode {
+    /** fornito dall'app Android Auto: lo stesso che usa la libreria ufficiale androidx.car.app */
+    private val CONNECTION = Uri.parse("content://androidx.car.app.connection")
+
+    fun isActive(c: Context): Boolean = when (Prefs.carMode(c)) {
+        Prefs.Car.ALWAYS -> true
+        Prefs.Car.NEVER -> false
+        Prefs.Car.AUTO -> androidAutoConnected(c)
+    }
+
+    fun androidAutoConnected(c: Context): Boolean {
+        val ui = c.getSystemService(android.app.UiModeManager::class.java)
+        if (ui?.currentModeType == android.content.res.Configuration.UI_MODE_TYPE_CAR) return true
+        return try {
+            c.contentResolver.query(CONNECTION, arrayOf("CarConnectionState"), null, null, null)?.use { cur ->
+                cur.moveToFirst() && cur.getInt(0) > 0
+            } ?: false
+        } catch (e: Exception) { false }
     }
 }

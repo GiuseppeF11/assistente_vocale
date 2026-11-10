@@ -39,6 +39,8 @@
         </intent>
         <package android:name="com.google.android.apps.maps" />
         <package android:name="com.spotify.music" />
+        <!-- Android Auto: per sapere se il telefono è collegato all'auto -->
+        <package android:name="com.google.android.projection.gearhead" />
         <intent>
             <action android:name="android.media.browse.MediaBrowserService" />
         </intent>
@@ -80,6 +82,19 @@
             android:taskAffinity=""
             android:theme="@style/Theme.Assistente.Overlay"
             android:turnScreenOn="true" />
+
+        <!-- ritorno dal login Spotify -->
+        <activity
+            android:name=".SpotifyLinkActivity"
+            android:exported="true"
+            android:launchMode="singleTask">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:host="callback" android:scheme="assistente-vocale" />
+            </intent-filter>
+        </activity>
 
         <service
             android:name=".WakeService"

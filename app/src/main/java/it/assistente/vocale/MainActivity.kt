@@ -108,6 +108,12 @@ class MainActivity : Activity() {
         setupVoice()
         setupFeedback()
         spotifyInfo = findViewById(R.id.spotify_info)
+        findViewById<Button>(R.id.spotify_link).setOnClickListener {
+            // login Spotify nel browser; al ritorno ci pensa SpotifyLinkActivity
+            open(Intent(Intent.ACTION_VIEW, SpotifyAccount.authorizeUrl(this)))
+        }
+        findViewById<Button>(R.id.spotify_unlink).setOnClickListener { SpotifyAccount.unlink(this); refresh() }
+        setupCar()
 
 
         home.setText(Prefs.home(this))
@@ -252,6 +258,19 @@ class MainActivity : Activity() {
     private fun isAssistant(): Boolean = try {
         getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_ASSISTANT)
     } catch (e: Exception) { false }
+
+    // ---- in auto ----
+
+    private fun setupCar() {
+        val modes = Prefs.Car.values().toList()
+        bindSpinner(findViewById(R.id.car_mode), modes.map { it.label }, modes.indexOf(Prefs.carMode(this))) { i ->
+            Prefs.setCarMode(this, modes[i]); refresh()
+        }
+        findViewById<Switch>(R.id.car_confirm).apply {
+            isChecked = Prefs.carConfirm(this@MainActivity)
+            setOnCheckedChangeListener { _, on -> Prefs.setCarConfirm(this@MainActivity, on) }
+        }
+    }
 
     // ---- segnale di ascolto ----
 
@@ -560,9 +579,20 @@ class MainActivity : Activity() {
         }
         asrInfo.text = asrDescription()
         downloadIt.visibility = if (Prefs.systemAsr(this)) View.VISIBLE else View.GONE
-        spotifyInfo.text = if (Actions.spotifyInstalled(this))
-            "Prova: «metti Albachiara da Spotify». Se Spotify non accetta il comando diretto, si apre la ricerca."
-        else "Spotify non è installato."
+        val linked = SpotifyAccount.isLinked(this)
+        spotifyInfo.text = when {
+            !Actions.spotifyInstalled(this) -> "Spotify non è installato."
+            linked -> "✓ Spotify collegato: la musica parte da sola, anche a telefono bloccato e in auto."
+            else -> "Collega una volta il tuo account: accedi a Spotify nel browser, poi Spotify chiede il permesso " +
+                "di comandare la musica. Senza collegamento si apre solo la ricerca."
+        }
+        findViewById<Button>(R.id.spotify_link).text = if (linked) "Ricollega Spotify" else "Collega Spotify"
+        findViewById<Button>(R.id.spotify_unlink).visibility = if (linked) View.VISIBLE else View.GONE
+        findViewById<TextView>(R.id.car_info).text = buildString {
+            append(if (CarMode.androidAutoConnected(this@MainActivity)) "Android Auto: collegato ✓" else "Android Auto: non collegato")
+            append("\nIn auto: niente popup, scelte e conferme a voce, voce dell'assistente dalle casse dell'auto. ")
+            append("Usa l'attivazione a voce: il tasto vocale del volante apre sempre l'assistente Google.")
+        }
         ttsInfo.text = listOf(voiceInfo, AssistantBus.ttsStatus).filter { it.isNotEmpty() }.joinToString("\n")
         findViewById<TextView>(R.id.howto).text = getString(R.string.howto, Prefs.wakePhrase(this))
     }

@@ -402,6 +402,54 @@
             android:textColor="@color/text_dim"
             android:textSize="15sp" />
 
+        <Button
+            android:id="@+id/spotify_link"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Collega Spotify"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/spotify_unlink"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Scollega Spotify"
+            android:textAllCaps="false" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:text="In auto"
+            android:textColor="@color/text"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <Spinner
+            android:id="@+id/car_mode"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:layout_marginTop="6dp" />
+
+        <Switch
+            android:id="@+id/car_confirm"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:minHeight="48dp"
+            android:text="Chiedi conferma prima di chiamare o navigare"
+            android:textColor="@color/text"
+            android:textSize="16sp" />
+
+        <TextView
+            android:id="@+id/car_info"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:lineSpacingExtra="3dp"
+            android:textColor="@color/text_dim"
+            android:textSize="15sp" />
+
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"

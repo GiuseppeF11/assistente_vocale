@@ -93,4 +93,20 @@ object ChoiceParser {
     }
 
     fun kind(answer: String): NumberKind? = CommandParser.kindOf(Text.tokens(answer))
+
+    private val yes = setOf(
+        "si", "ok", "okay", "conferma", "confermo", "certo", "esatto", "giusto", "vai", "procedi",
+        "perfetto", "sicuro", "chiama", "chiamalo", "chiamala", "avvia", "andiamo", "bene",
+    )
+    private val no = setOf("no", "annulla", "sbagliato", "aspetta", "stop", "lascia", "nessuno", "niente")
+
+    /** true = sì, false = no, null = né l'uno né l'altro (forse un nuovo comando). */
+    fun yesNo(answer: String): Boolean? {
+        val t = Text.tokens(answer)
+        if (t.isEmpty()) return null
+        if (t.any { it in no }) return false
+        // risposta breve con un sì: "sì grazie", "ok vai"; frasi lunghe sono un nuovo comando
+        if (t.size <= 4 && t.any { it in yes }) return true
+        return null
+    }
 }

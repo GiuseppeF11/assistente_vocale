@@ -116,6 +116,32 @@ class LogicTest {
         assertEquals(Command.Play(PlayRequest("vasco rossi", MediaFocus.ANY)), CommandParser.parse("metti vasco rossi"))
     }
 
+    @Test fun confermeInAuto() {
+        assertEquals(true, ChoiceParser.yesNo("sì"))
+        assertEquals(true, ChoiceParser.yesNo("Sì, chiama"))
+        assertEquals(true, ChoiceParser.yesNo("ok vai"))
+        assertEquals(false, ChoiceParser.yesNo("no"))
+        assertEquals(false, ChoiceParser.yesNo("no, annulla"))
+        assertEquals(null, ChoiceParser.yesNo("chiama mario bianchi sul cellulare"))
+        assertEquals(null, ChoiceParser.yesNo("boh"))
+    }
+
+    @Test fun sceltaSpotify() {
+        val t = SpotifyItem.Kind.TRACK
+        val tracks = listOf(SpotifyItem(t, "Albachiara", "spotify:track:1", "Vasco Rossi", "spotify:album:9"))
+        val artists = listOf(SpotifyItem(SpotifyItem.Kind.ARTIST, "Vasco Rossi", "spotify:artist:2"))
+        val albums = listOf(SpotifyItem(SpotifyItem.Kind.ALBUM, "Nevermind", "spotify:album:3"))
+        val playlists = listOf(SpotifyItem(SpotifyItem.Kind.PLAYLIST, "Relax", "spotify:playlist:4"))
+        fun pick(q: String, f: MediaFocus = MediaFocus.ANY) = SpotifyChooser.choose(q, f, tracks, artists, albums, playlists)?.uri
+        assertEquals("spotify:artist:2", pick("vasco rossi"))
+        assertEquals("spotify:track:1", pick("albachiara"))
+        assertEquals("spotify:track:1", pick("albachiara di vasco rossi".replace(" di ", " ")))
+        assertEquals("spotify:album:3", pick("nevermind"))
+        assertEquals("spotify:playlist:4", pick("relax", MediaFocus.PLAYLIST))
+        assertEquals("spotify:album:3", pick("qualunque", MediaFocus.ALBUM))
+        assertEquals("Albachiara di Vasco Rossi", tracks[0].spoken())
+    }
+
     @Test fun navigazione() {
         assertEquals(Command.Navigate("catania"), CommandParser.parse("portami a catania"))
         assertEquals(Command.Navigate("via etnea 120 catania"), CommandParser.parse("naviga verso via etnea cento venti catania"))

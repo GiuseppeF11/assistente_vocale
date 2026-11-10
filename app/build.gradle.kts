@@ -62,6 +62,9 @@ dependencies {
     // riconoscimento vocale offline; nessun'altra libreria (niente AndroidX: l'app resta leggera)
     implementation("net.java.dev.jna:jna:5.18.1@aar")
     implementation("com.alphacephei:vosk-android:0.3.75@aar")
+    // Spotify App Remote (kit ufficiale, distribuito come file) e la sua dipendenza
+    implementation(files("libs/spotify-app-remote-release-0.8.0.aar"))
+    implementation("com.google.code.gson:gson:2.10.1")
 
     testImplementation("junit:junit:4.13.2")
 }
