@@ -1040,15 +1040,10 @@ class WakeService : Service(), AssistantBus.Controller {
         val seq = actionSeq
         speak("Metto $what su Spotify") {
             if (!alive || seq != actionSeq) return@speak
-            SpotifyPlayer.play(this, req, canOpenUi = !isLocked()) { result ->
+            SpotifyPlayer.play(this, req) { result ->
                 if (!alive || seq != actionSeq) return@play
                 when (result) {
                     SpotifyPlayer.Result.PLAYING -> hide()
-                    SpotifyPlayer.Result.NO_ACCESS -> launchApp(
-                        AssistantBus.Launch.Play(req),
-                        "Apro la ricerca. Per far partire la musica da sola consenti l'accesso dalle impostazioni dell'app.",
-                        "Non riesco ad aprire Spotify.",
-                    )
                     SpotifyPlayer.Result.NOT_STARTED -> launchApp(
                         AssistantBus.Launch.Play(req),
                         "Spotify non è partito da solo: apro la ricerca.",

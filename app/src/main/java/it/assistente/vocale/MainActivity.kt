@@ -108,9 +108,7 @@ class MainActivity : Activity() {
         setupVoice()
         setupFeedback()
         spotifyInfo = findViewById(R.id.spotify_info)
-        findViewById<Button>(R.id.spotify_access).setOnClickListener {
-            open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-        }
+
 
         home.setText(Prefs.home(this))
         work.setText(Prefs.work(this))
@@ -562,15 +560,9 @@ class MainActivity : Activity() {
         }
         asrInfo.text = asrDescription()
         downloadIt.visibility = if (Prefs.systemAsr(this)) View.VISIBLE else View.GONE
-        spotifyInfo.text = when {
-            !Actions.spotifyInstalled(this) -> "Spotify non è installato."
-            SpotifyPlayer.hasAccess(this) ->
-                "✓ La musica parte da sola, anche a telefono bloccato. Prova: «metti Albachiara da Spotify»."
-            else -> "✗ Senza questo permesso Spotify apre solo la ricerca. Tocca il pulsante e attiva " +
-                "«${getString(R.string.app_name)}» in «Accesso alle notifiche». Se Android dice «Impostazione " +
-                "limitata»: Impostazioni → App → ${getString(R.string.app_name)} → menu ⋮ in alto → " +
-                "«Consenti impostazioni limitate», poi riprova."
-        }
+        spotifyInfo.text = if (Actions.spotifyInstalled(this))
+            "Prova: «metti Albachiara da Spotify». Se Spotify non accetta il comando diretto, si apre la ricerca."
+        else "Spotify non è installato."
         ttsInfo.text = listOf(voiceInfo, AssistantBus.ttsStatus).filter { it.isNotEmpty() }.joinToString("\n")
         findViewById<TextView>(R.id.howto).text = getString(R.string.howto, Prefs.wakePhrase(this))
     }

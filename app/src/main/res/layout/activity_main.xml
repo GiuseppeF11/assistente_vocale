@@ -402,13 +402,6 @@
             android:textColor="@color/text_dim"
             android:textSize="15sp" />
 
-        <Button
-            android:id="@+id/spotify_access"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Consenti di far partire la musica"
-            android:textAllCaps="false" />
-
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"

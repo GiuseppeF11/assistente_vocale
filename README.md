@@ -105,15 +105,14 @@ Nell'app si scelgono motore (Google, Samsung, …), voce italiana e velocità, c
 
 ## Spotify
 
-Il comando standard di Android («cerca e riproduci») Spotify lo tratta come una semplice ricerca. Per far
-partire davvero la musica l'app parla con il **lettore di Spotify** (la sessione multimediale, quella che
-si controlla dalla tendina) e gli chiede la ricerca vocale, come fanno Android Auto e gli assistenti:
-funziona anche a telefono bloccato e senza aprire Spotify. Se Spotify è chiuso, lo si sveglia con il
-tasto «play» (per un attimo riprende l'ultimo brano) e poi si chiede il brano giusto.
+Il comando standard di Android («cerca e riproduci») Spotify lo tratta come una semplice ricerca. L'app
+prova quindi a collegarsi al **lettore di Spotify** (MediaBrowser, come Android Auto e gli assistenti) e gli
+chiede la ricerca vocale, controllando che il brano sia davvero cambiato. Se Spotify rifiuta il collegamento,
+si apre la ricerca.
 
-Serve l'**accesso alle notifiche** (pulsante nell'app). Su Android 13+ per le app installate da APK compare
-«Impostazione limitata»: Impostazioni → App → Assistente Vocale → menu ⋮ → «Consenti impostazioni limitate».
-Senza il permesso, o se Spotify ignora la richiesta, si apre la ricerca.
+Niente accesso alle notifiche: con quel permesso Play Protect blocca l'installazione degli APK scaricati
+dal browser («App bloccata per proteggere il tuo dispositivo», senza alternative). Lo stesso vale per
+lettura SMS e servizi di accessibilità: l'app non deve mai chiederli.
 
 ## Segnale di ascolto
 
