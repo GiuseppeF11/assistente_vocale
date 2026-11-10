@@ -206,14 +206,21 @@ object Notifications {
     const val ID_SERVICE = 1
     const val ID_WAKE = 2
     const val ID_BOOT = 3
-    private const val CH_SERVICE = "ascolto"
+    /** canale "minimo": niente icona nella barra di stato, notifica compressa in fondo */
+    private const val CH_SERVICE = "ascolto_silenzioso"
+    private const val CH_SERVICE_OLD = "ascolto"
     private const val CH_ALERT = "attivazione"
 
     private fun nm(c: Context) = c.getSystemService(NotificationManager::class.java)
 
     private fun channels(c: Context) {
+        nm(c).deleteNotificationChannel(CH_SERVICE_OLD)
         nm(c).createNotificationChannel(
-            NotificationChannel(CH_SERVICE, "Ascolto in background", NotificationManager.IMPORTANCE_LOW)
+            NotificationChannel(CH_SERVICE, "Ascolto in background", NotificationManager.IMPORTANCE_MIN).apply {
+                description = "Obbligatoria per Android finché l'assistente ascolta. Non mostra icone."
+                setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_SECRET
+            }
         )
         nm(c).createNotificationChannel(
             NotificationChannel(CH_ALERT, "Attivazione assistente", NotificationManager.IMPORTANCE_HIGH)
@@ -235,9 +242,11 @@ object Notifications {
         )
         return Notification.Builder(c, CH_SERVICE)
             .setSmallIcon(R.drawable.ic_mic)
-            .setContentTitle("Assistente in ascolto")
-            .setContentText("Di' «${Prefs.wakePhrase(c)}»")
+            .setContentTitle("In attesa di «${Prefs.wakePhrase(c)}»")
             .setOngoing(true)
+            .setShowWhen(false)
+            .setCategory(Notification.CATEGORY_SERVICE)
+            .setVisibility(Notification.VISIBILITY_SECRET)
             .setContentIntent(activity(c, MainActivity::class.java, 11))
             .addAction(Notification.Action.Builder(null, "Ferma", stop).build())
             .build()

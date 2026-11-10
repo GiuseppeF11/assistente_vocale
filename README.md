@@ -8,8 +8,9 @@ vocale del telefono (Google, sul dispositivo e offline quando l'italiano è scar
 
 1. Un servizio in primo piano tiene aperto il microfono e aspetta la frase di attivazione
    (predefinita **«ciao assistente»**, modificabile nell'app).
-2. Alla parola di attivazione: segnale acustico, lo schermo si accende e compare la schermata
-   dell'assistente (anche sopra il blocco schermo) con il microfono che pulsa.
+2. Alla frase di attivazione (verificata due volte, vedi sotto): segnale acustico e un **popup** in
+   basso con il microfono che pulsa. A telefono sbloccato il popup compare sopra l'app in uso, senza
+   aprire niente; a telefono bloccato lo schermo si accende e lo stesso popup appare sopra il blocco.
 3. Mentre parli, il testo capito compare parola per parola.
 4. A fine frase:
    - comando chiaro → lo esegue (per le chiamate c'è 1,8 s per toccare «Annulla»);
@@ -54,6 +55,13 @@ modifica compila da solo l'APK. Si scarica da **Actions → ultima esecuzione �
 AssistenteVocale-apk** (uno zip con dentro `app-debug.apk`), poi si copia sul telefono e si installa
 consentendo le «origini sconosciute».
 
+## Frase di attivazione: doppia verifica
+
+Il rilevatore conosce solo le parole della frase e tende a "forzarci dentro" qualunque suono
+(dici «ok» e lui sente «ok alfio»). Quando crede di averla sentita, gli ultimi 3 secondi di audio
+vengono riascoltati con il riconoscimento completo: se la frase non c'è, l'attivazione viene scartata
+e la riga «Sento» dell'app mostra «… → non è «ok alfio», ignoro».
+
 ## Se non capisce
 
 - **Frase di attivazione**: nell'app, con l'ascolto attivo, la riga «Sento: …» mostra cosa riconosce
@@ -92,8 +100,10 @@ vocabolario del modello Vosk (`graph/words.txt`).
   (impronta/PIN) e poi avvia Maps.
 - **Dopo un riavvio** Android (14+) vieta di riaccendere il microfono in automatico: arriva una
   notifica, basta toccarla (o aprire l'app) e l'ascolto riparte.
-- **Batteria e privacy.** Il microfono resta sempre attivo: pallino verde fisso e consumo
-  continuo. Su Xiaomi, Samsung, Oppo ecc. va disattivato il risparmio batteria per l'app,
+- **Microfono sempre in ascolto.** Per sentire la frase di attivazione il microfono deve restare
+  aperto: Android mostra il **pallino verde** finché ascolta e nessuna app può nasconderlo (solo
+  l'assistente di sistema preinstallato usa un canale privilegiato). La notifica dell'app invece è
+  ridotta al minimo: nessuna icona nella barra di stato. Consumo di batteria continuo. Su Xiaomi, Samsung, Oppo ecc. va disattivato il risparmio batteria per l'app,
   altrimenti il sistema la chiude.
 - **Nomi difficili.** Al riconoscitore del telefono vengono suggeriti i nomi della rubrica, e la
   ricerca tollera lettere sbagliate e differenze di pronuncia (Christian/Cristian); se non trova, chiede.

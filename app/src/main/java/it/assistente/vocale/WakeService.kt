@@ -2,6 +2,7 @@ package it.assistente.vocale
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.app.KeyguardManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
@@ -40,6 +41,7 @@ import it.assistente.vocale.logic.Match
 import it.assistente.vocale.logic.NumberKind
 import it.assistente.vocale.logic.PhoneNumber
 import it.assistente.vocale.logic.Text
+import it.assistente.vocale.logic.WakeMatcher
 import org.json.JSONArray
 import org.json.JSONObject
 import org.vosk.Model
@@ -70,6 +72,10 @@ class WakeService : Service(), AssistantBus.Controller {
         private const val MAX_MISUNDERSTANDINGS = 2
         /** il riconoscitore di sistema non ha risposto: si abbandona */
         private const val SYSTEM_ASR_WATCHDOG_MS = 20000L
+        /** audio tenuto in memoria per la verifica della frase di attivazione */
+        private const val RING_SECONDS = 3
+        /** dopo un parziale con la frase, aspetta che la parola finisca prima di verificare */
+        private const val VERIFY_AFTER_PARTIAL_MS = 400L
 
         @Volatile var running = false
             private set
@@ -118,6 +124,7 @@ class WakeService : Service(), AssistantBus.Controller {
 
     // --- solo thread audio ---
     private var wakeRec: Recognizer? = null
+    private val ring = AudioRing(RATE_HZ * RING_SECONDS)
 
     // --- solo thread principale ---
     private var wakeLock: PowerManager.WakeLock? = null
@@ -138,6 +145,7 @@ class WakeService : Service(), AssistantBus.Controller {
     private var systemRecognizer: SpeechRecognizer? = null
     /** cambia a ogni nuovo ascolto: scarta le risposte tardive di un riconoscitore precedente */
     private var listenSeq = 0
+    private val overlay by lazy { AssistantOverlay(this) }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -216,6 +224,7 @@ class WakeService : Service(), AssistantBus.Controller {
         running = false
         main.removeCallbacksAndMessages(null)
         destroySystemRecognizer()
+        overlay.remove()
         audioThread?.join(800)
         tts?.shutdown()
         tone?.release()
@@ -354,7 +363,7 @@ class WakeService : Service(), AssistantBus.Controller {
         repeat(15) {
             val rec = AudioRecord(
                 MediaRecorder.AudioSource.VOICE_RECOGNITION, RATE_HZ,
-                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuf, RATE_HZ * 2),
+                AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, maxOf(minBuf, RATE_HZ * 6),
             )
             if (rec.state == AudioRecord.STATE_INITIALIZED) {
                 // alza la voce quando il telefono è lontano (sul cruscotto, sul tavolo)
@@ -395,6 +404,7 @@ class WakeService : Service(), AssistantBus.Controller {
         val buf = ShortArray(RATE_HZ / 10) // 100 ms
         var listenStart = SystemClock.elapsedRealtime()
         var lastPartial = ""
+        var verifyAt = 0L
         resetRequested = true
         while (alive && mode != Mode.EXTERNAL) {
             if (wakeDirty) {
@@ -409,6 +419,8 @@ class WakeService : Service(), AssistantBus.Controller {
             if (resetRequested) {
                 resetRequested = false
                 wake.reset(); cmd.reset()
+                ring.clear()
+                verifyAt = 0L
                 listenStart = now
                 lastPartial = ""
             }
@@ -419,13 +431,34 @@ class WakeService : Service(), AssistantBus.Controller {
                 Mode.PAUSED, Mode.EXTERNAL -> Unit
 
                 Mode.WAKE -> {
+                    ring.write(buf, n)
                     val final = wake.acceptWaveForm(buf, n)
                     val heard = Text.spoken(if (final) field(wake.result, "text") else field(wake.partialResult, "partial"))
-                    if (heard.isNotEmpty()) AssistantBus.heard(heard)
-                    if (heard.contains(wakePhrase)) {
+                    if (heard.isNotEmpty() && !final) AssistantBus.heard(heard)
+
+                    // 1° livello: il rilevatore a grammatica crede di aver sentito la frase
+                    val candidate = heard.contains(wakePhrase)
+                    if (candidate) {
+                        if (final) verifyAt = now
+                        else if (verifyAt == 0L) verifyAt = now + VERIFY_AFTER_PARTIAL_MS
+                    } else if (final) {
+                        verifyAt = 0L
+                    }
+
+                    // 2° livello: lo stesso audio riascoltato con tutto il vocabolario
+                    if (verifyAt != 0L && now >= verifyAt) {
+                        verifyAt = 0L
                         wake.reset()
-                        mode = Mode.PAUSED
-                        main.post { onWake() }
+                        val texts = verify(cmd)
+                        if (texts.any { WakeMatcher.matches(wakePhrase, it) }) {
+                            ring.clear()
+                            AssistantBus.heard(wakePhrase)
+                            mode = Mode.PAUSED
+                            main.post { onWake() }
+                        } else {
+                            val what = texts.firstOrNull() ?: "nulla"
+                            AssistantBus.heard("$what → non è «$wakePhrase», ignoro")
+                        }
                     }
                 }
 
@@ -459,6 +492,18 @@ class WakeService : Service(), AssistantBus.Controller {
                 }
             }
         }
+    }
+
+    /** Riascolta l'audio recente in dettatura libera e restituisce le ipotesi. */
+    private fun verify(cmd: Recognizer): List<String> {
+        cmd.reset()
+        val texts = ArrayList<String>()
+        ring.forEachChunk(RATE_HZ / 10) { chunk, len ->
+            if (cmd.acceptWaveForm(chunk, len)) texts += alternatives(cmd.result)
+        }
+        texts += alternatives(cmd.finalResult)
+        cmd.reset()
+        return texts.distinct()
     }
 
     private fun field(json: String, key: String): String = try {
@@ -857,9 +902,21 @@ class WakeService : Service(), AssistantBus.Controller {
                 }
             }
         }
-        // l'apertura del navigatore la fa la schermata, che può chiedere lo sblocco
-        AssistantBus.post(UiState(Phase.WORKING, "Navigazione verso $shown", transcript, navigateTo = destination))
         speak("Avvio la navigazione verso $shown")
+        if (!isLocked()) {
+            // sbloccato: Maps si apre subito, il popup sparisce da solo
+            AssistantBus.post(UiState(Phase.WORKING, "Navigazione verso $shown", transcript))
+            backToWake()
+            if (Actions.navigate(this, destination)) {
+                main.removeCallbacks(hideRunnable)
+                main.postDelayed(hideRunnable, 1200)
+            } else {
+                finish("Nessuna app di navigazione trovata.", error = true)
+            }
+            return
+        }
+        // bloccato: ci pensa la schermata, che chiede lo sblocco prima di aprire Maps
+        AssistantBus.post(UiState(Phase.WORKING, "Navigazione verso $shown", transcript, navigateTo = destination))
         backToWake()
     }
 
@@ -904,9 +961,19 @@ class WakeService : Service(), AssistantBus.Controller {
         mode = Mode.WAKE
     }
 
+    private fun isLocked(): Boolean =
+        getSystemService(KeyguardManager::class.java).isKeyguardLocked ||
+            !getSystemService(PowerManager::class.java).isInteractive
+
+    /**
+     * Sbloccato: un popup sopra l'app in uso, senza aprire niente.
+     * Bloccato: Android non mostra popup sopra il blocco schermo, quindi lo stesso popup
+     * dentro una schermata trasparente che accende il display.
+     */
     private fun showScreen() {
-        val intent = Intent(this, AssistantActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         if (Settings.canDrawOverlays(this)) {
+            if (!isLocked() && overlay.show()) return
+            val intent = Intent(this, AssistantActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             try { startActivity(intent); return } catch (e: Exception) { Log.w(TAG, "Schermata non avviata", e) }
         }
         Notifications.wake(this)
@@ -943,5 +1010,38 @@ class WakeService : Service(), AssistantBus.Controller {
         0 -> ""
         1 -> items[0]
         else -> items.dropLast(1).joinToString(", ") + " o " + items.last()
+    }
+}
+
+/** Gli ultimi secondi di audio, per riascoltarli quando sembra di aver sentito la frase. */
+private class AudioRing(size: Int) {
+    private val data = ShortArray(size)
+    private var pos = 0
+    private var filled = 0
+
+    fun write(src: ShortArray, n: Int) {
+        var i = 0
+        while (i < n) {
+            val len = minOf(n - i, data.size - pos)
+            System.arraycopy(src, i, data, pos, len)
+            pos = (pos + len) % data.size
+            i += len
+        }
+        filled = minOf(data.size, filled + n)
+    }
+
+    fun clear() { filled = 0 }
+
+    fun forEachChunk(chunk: Int, block: (ShortArray, Int) -> Unit) {
+        val tmp = ShortArray(chunk)
+        var start = (pos - filled + data.size) % data.size
+        var left = filled
+        while (left > 0) {
+            val len = minOf(chunk, left)
+            for (k in 0 until len) tmp[k] = data[(start + k) % data.size]
+            block(tmp, len)
+            start = (start + len) % data.size
+            left -= len
+        }
     }
 }

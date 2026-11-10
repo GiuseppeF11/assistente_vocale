@@ -51,6 +51,21 @@ class LogicTest {
         assertEquals("cristian", Text.phonetic("christian"))
     }
 
+    @Test fun verificaAttivazione() {
+        assertTrue(WakeMatcher.matches("ok alfio", "ok alfio"))
+        assertTrue(WakeMatcher.matches("ok alfio", "allora ok alfio chiama"))
+        assertTrue(WakeMatcher.matches("ok alfio", "o calfio"))
+        assertTrue(WakeMatcher.matches("ok alfio", "ok al fio"))
+        assertTrue(WakeMatcher.matches("ciao assistente", "ciao assistenti"))
+        // il caso segnalato: "ok" da solo non deve attivare
+        assertTrue(!WakeMatcher.matches("ok alfio", "ok"))
+        assertTrue(!WakeMatcher.matches("ok alfio", "ok va bene"))
+        assertTrue(!WakeMatcher.matches("ok alfio", "ok alfa"))
+        assertTrue(!WakeMatcher.matches("ok alfio", "alfio"))
+        assertTrue(!WakeMatcher.matches("ciao assistente", "ciao"))
+        assertTrue(!WakeMatcher.matches("ok alfio", ""))
+    }
+
     @Test fun navigazione() {
         assertEquals(Command.Navigate("catania"), CommandParser.parse("portami a catania"))
         assertEquals(Command.Navigate("via etnea 120 catania"), CommandParser.parse("naviga verso via etnea cento venti catania"))

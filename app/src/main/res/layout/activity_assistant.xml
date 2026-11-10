@@ -1,76 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- A telefono bloccato: lo stesso popup in basso, sopra il blocco schermo leggermente scurito -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/backdrop"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="@color/bg"
-    android:fitsSystemWindows="true"
-    android:gravity="center_horizontal"
-    android:orientation="vertical"
-    android:padding="24dp">
+    android:background="#66000000"
+    android:fitsSystemWindows="true">
 
-    <!-- riferimento visivo: pulsa mentre ascolta, cambia colore con lo stato -->
-    <FrameLayout
-        android:layout_width="160dp"
-        android:layout_height="160dp"
-        android:layout_marginTop="48dp">
-
-        <View
-            android:id="@+id/circle"
-            android:layout_width="112dp"
-            android:layout_height="112dp"
-            android:layout_gravity="center"
-            android:background="@drawable/circle"
-            android:backgroundTint="@color/listening" />
-
-        <ImageView
-            android:layout_width="48dp"
-            android:layout_height="48dp"
-            android:layout_gravity="center"
-            android:importantForAccessibility="no"
-            android:src="@drawable/ic_mic" />
-    </FrameLayout>
-
-    <TextView
-        android:id="@+id/message"
+    <include
+        layout="@layout/assistant_card"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
-        android:gravity="center"
-        android:textColor="@color/text_dim"
-        android:textSize="18sp" />
-
-    <!-- quello che ha capito, parola per parola -->
-    <TextView
-        android:id="@+id/transcript"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
-        android:gravity="center"
-        android:minHeight="80dp"
-        android:textColor="@color/text"
-        android:textSize="30sp"
-        android:textStyle="bold" />
-
-    <ScrollView
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1">
-
-        <LinearLayout
-            android:id="@+id/options"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical" />
-    </ScrollView>
-
-    <Button
-        android:id="@+id/cancel"
-        android:layout_width="match_parent"
-        android:layout_height="64dp"
-        android:layout_marginTop="12dp"
-        android:background="@drawable/option_bg"
-        android:text="Annulla"
-        android:textAllCaps="false"
-        android:textColor="@color/text"
-        android:textSize="18sp" />
-</LinearLayout>
+        android:layout_gravity="bottom"
+        android:layout_marginStart="12dp"
+        android:layout_marginEnd="12dp"
+        android:layout_marginBottom="32dp" />
+</FrameLayout>
