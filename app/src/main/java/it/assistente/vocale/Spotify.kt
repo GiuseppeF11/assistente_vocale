@@ -43,6 +43,13 @@ object SpotifyAccount {
     fun clientId(c: Context): String = sp(c).getString("client_id", null)?.trim()?.ifEmpty { null } ?: DEFAULT_CLIENT_ID
     fun setClientId(c: Context, id: String) = sp(c).edit().putString("client_id", id.trim()).apply()
 
+    /** Impronta SHA1 della firma dell'app installata: deve coincidere con quella nella dashboard Spotify. */
+    fun signingSha1(c: Context): String = try {
+        val info = c.packageManager.getPackageInfo(c.packageName, android.content.pm.PackageManager.GET_SIGNING_CERTIFICATES)
+        val cert = info.signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray() ?: ByteArray(0)
+        MessageDigest.getInstance("SHA-1").digest(cert).joinToString(":") { "%02X".format(it) }
+    } catch (e: Exception) { "?" }
+
     fun isLinked(c: Context) = clientId(c).isNotEmpty() && sp(c).getString("refresh", null) != null
 
     fun unlink(c: Context) = sp(c).edit().remove("refresh").remove("access").remove("expires").apply()
@@ -273,8 +280,13 @@ class SpotifyLinkActivity : Activity() {
                     }
                     override fun onFailure(error: Throwable) {
                         Log.w(TAG, "App Remote (collegamento)", error)
-                        label.text = "Account collegato, ma l'app Spotify non ha dato il permesso: ${error.message ?: error.javaClass.simpleName}. " +
-                            "Apri Spotify, accedi e riprova da Impostazioni → Collega Spotify."
+                        label.text = "Login riuscito, ma Spotify non ha confermato il permesso.\n\n" +
+                            "Quasi sempre il pacchetto o l'impronta nella dashboard Spotify non corrispondono a questa app. " +
+                            "In developer.spotify.com → la tua app → Settings → Android packages devono esserci esattamente:\n\n" +
+                            "Package name: ${packageName}\nSHA1: ${SpotifyAccount.signingSha1(this@SpotifyLinkActivity)}\n\n" +
+                            "Salva, poi nell'app premi di nuovo «Collega Spotify».\n\n" +
+                            "(Dettaglio: ${error.message ?: error.javaClass.simpleName})"
+                        label.setTextIsSelectable(true)
                     }
                 })
             }

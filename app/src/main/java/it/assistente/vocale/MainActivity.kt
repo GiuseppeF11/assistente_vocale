@@ -584,8 +584,11 @@ class MainActivity : Activity() {
             !Actions.spotifyInstalled(this) -> "Spotify non è installato."
             linked -> "✓ Spotify collegato: la musica parte da sola, anche a telefono bloccato e in auto."
             else -> "Collega una volta il tuo account: accedi a Spotify nel browser, poi Spotify chiede il permesso " +
-                "di comandare la musica. Senza collegamento si apre solo la ricerca."
+                "di comandare la musica. Senza collegamento si apre solo la ricerca.\n\n" +
+                "Nella dashboard Spotify (Settings → Android packages) devono esserci:\n" +
+                "Package name: $packageName\nSHA1: ${SpotifyAccount.signingSha1(this)}"
         }
+        spotifyInfo.setTextIsSelectable(true)
         findViewById<Button>(R.id.spotify_link).text = if (linked) "Ricollega Spotify" else "Collega Spotify"
         findViewById<Button>(R.id.spotify_unlink).visibility = if (linked) View.VISIBLE else View.GONE
         findViewById<TextView>(R.id.car_info).text = buildString {
