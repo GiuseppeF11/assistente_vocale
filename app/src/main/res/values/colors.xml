@@ -8,4 +8,6 @@
     <color name="asking">#FFF2A93B</color>
     <color name="working">#FF27AE60</color>
     <color name="error">#FFEB5757</color>
+    <color name="divider">#FF2A303B</color>
+    <color name="accent_text">#FF6EA8FE</color>
 </resources>

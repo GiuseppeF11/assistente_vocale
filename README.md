@@ -178,6 +178,14 @@ e la riga «Sento» dell'app mostra «… → non è «ok alfio», ignoro».
 - **Voce**: se manca la voce italiana l'assistente resta muto (meglio che parlare con pronuncia
   inglese): «Installa / aggiorna la voce italiana».
 
+## Interfaccia
+
+Schermata principale con lo stato (attivo / in pausa / spento, riga «Sento», avvia/ferma), gli avvisi solo
+quando servono (permessi mancanti, aggiornamento) e l'elenco delle sezioni con un riassunto di una riga:
+Attivazione, Riconoscimento, Voce e suoni, Chiamate, Spotify, Calendario, Luoghi, In auto, Risparmio
+energetico, Permessi, Comandi. Ogni sezione ha la sua pagina (`SectionActivity`), costruita con gli
+elementi comuni di `Ui.kt`.
+
 ## Struttura
 
 ```

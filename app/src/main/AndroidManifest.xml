@@ -75,6 +75,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".SectionActivity"
+            android:exported="false"
+            android:parentActivityName=".MainActivity"
+            android:windowSoftInputMode="stateHidden|adjustResize" />
+
         <!-- compare sopra il blocco schermo e accende il display -->
         <activity
             android:name=".AssistantActivity"
