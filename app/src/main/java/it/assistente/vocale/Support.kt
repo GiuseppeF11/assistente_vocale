@@ -65,6 +65,21 @@ object Prefs {
         .putString("fb_sound", sound.name).putString("fb_uri", uri)
         .putInt("fb_volume", volume).putBoolean("fb_vibrate", vibrate).apply()
 
+    // risparmio energetico
+    enum class Vad(val label: String, val sensitivity: it.assistente.vocale.logic.VoiceDetector.Sensitivity?) {
+        OFF("Disattivato: riconoscitore sempre acceso", null),
+        HIGH("Sensibilità alta (sente anche voci lontane)", it.assistente.vocale.logic.VoiceDetector.Sensitivity.HIGH),
+        MEDIUM("Sensibilità media (consigliata)", it.assistente.vocale.logic.VoiceDetector.Sensitivity.MEDIUM),
+        LOW("Sensibilità bassa (consuma meno, parla vicino)", it.assistente.vocale.logic.VoiceDetector.Sensitivity.LOW),
+    }
+    fun vad(c: Context): Vad = runCatching { Vad.valueOf(sp(c).getString("vad", "MEDIUM")!!) }.getOrDefault(Vad.MEDIUM)
+    fun setVad(c: Context, v: Vad) = sp(c).edit().putString("vad", v.name).apply()
+    fun voiceDetector(c: Context) = vad(c).sensitivity
+    fun batteryPause(c: Context) = sp(c).getBoolean("battery_pause", true)
+    fun batteryThreshold(c: Context) = sp(c).getInt("battery_threshold", 20)
+    fun setBatteryPause(c: Context, on: Boolean, threshold: Int) =
+        sp(c).edit().putBoolean("battery_pause", on).putInt("battery_threshold", threshold).apply()
+
     // calendario in cui scrivere gli eventi (-1 = principale)
     fun calendarId(c: Context): Long = sp(c).getLong("calendar", -1)
     fun setCalendarId(c: Context, id: Long) = sp(c).edit().putLong("calendar", id).apply()
@@ -356,7 +371,7 @@ object Notifications {
     )
 
     /** Notifica fissa del servizio in ascolto, con il pulsante per fermarlo. */
-    fun service(c: Context): Notification {
+    fun service(c: Context, paused: String? = null): Notification {
         channels(c)
         val stop = PendingIntent.getService(
             c, 10, Intent(c, WakeService::class.java).setAction(WakeService.ACTION_STOP),
@@ -364,7 +379,7 @@ object Notifications {
         )
         return Notification.Builder(c, CH_SERVICE)
             .setSmallIcon(R.drawable.ic_mic)
-            .setContentTitle("In attesa di «${Prefs.wakePhrase(c)}»")
+            .setContentTitle(paused ?: "In attesa di «${Prefs.wakePhrase(c)}»")
             .setOngoing(true)
             .setShowWhen(false)
             .setCategory(Notification.CATEGORY_SERVICE)
@@ -395,7 +410,7 @@ object Notifications {
 
     fun cancelWake(c: Context) = nm(c).cancel(ID_WAKE)
 
-    fun refreshService(c: Context) = nm(c).notify(ID_SERVICE, service(c))
+    fun refreshService(c: Context, paused: String? = null) = nm(c).notify(ID_SERVICE, service(c, paused))
 
     /** L'utente ha disattivato la categoria "Ascolto in background"? (l'ascolto continua, la notifica no) */
     fun serviceHidden(c: Context): Boolean {

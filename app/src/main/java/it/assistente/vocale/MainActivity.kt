@@ -117,6 +117,7 @@ class MainActivity : Activity() {
         }
         findViewById<Button>(R.id.spotify_unlink).setOnClickListener { SpotifyAccount.unlink(this); refresh() }
         setupCar()
+        setupEnergy()
 
 
         home.setText(Prefs.home(this))
@@ -288,6 +289,28 @@ class MainActivity : Activity() {
         calendarsShown = ids
         val selected = CalendarStore.target(this)?.let { t -> cals.indexOfFirst { it.id == t.id } } ?: 0
         bindSpinner(spinner, cals.map { it.label }, selected.coerceAtLeast(0)) { i -> Prefs.setCalendarId(this, cals[i].id) }
+    }
+
+    // ---- risparmio energetico ----
+
+    private val thresholds = listOf(10, 15, 20, 25, 30)
+
+    private fun setupEnergy() {
+        val modes = Prefs.Vad.values().toList()
+        bindSpinner(findViewById(R.id.vad), modes.map { it.label }, modes.indexOf(Prefs.vad(this))) { i ->
+            Prefs.setVad(this, modes[i])
+            WakeService.reload(this)
+            refresh()
+        }
+        val sw = findViewById<Switch>(R.id.battery_pause)
+        val th = findViewById<Spinner>(R.id.battery_threshold)
+        sw.isChecked = Prefs.batteryPause(this)
+        bindSpinner(th, thresholds.map { "Sotto il $it%" }, thresholds.indexOf(Prefs.batteryThreshold(this)).coerceAtLeast(2)) { i ->
+            Prefs.setBatteryPause(this, sw.isChecked, thresholds[i]); WakeService.reload(this); refresh()
+        }
+        sw.setOnCheckedChangeListener { _, on ->
+            Prefs.setBatteryPause(this, on, Prefs.batteryThreshold(this)); WakeService.reload(this); refresh()
+        }
     }
 
     // ---- in auto ----
@@ -624,6 +647,15 @@ class MainActivity : Activity() {
         }
         asrInfo.text = asrDescription()
         downloadIt.visibility = if (Prefs.systemAsr(this)) View.VISIBLE else View.GONE
+        findViewById<TextView>(R.id.vad_info).text = when (Prefs.vad(this)) {
+            Prefs.Vad.OFF -> "Il riconoscitore analizza tutto l'audio, anche il silenzio: è la scelta che consuma di più."
+            else -> "Il microfono resta aperto, ma il riconoscitore si accende solo quando qualcuno parla. " +
+                "Se a volte non ti sente, alza la sensibilità; con TV o musica accese il risparmio è minore."
+        }
+        findViewById<Spinner>(R.id.battery_threshold).isEnabled = Prefs.batteryPause(this)
+        findViewById<TextView>(R.id.battery_info).text =
+            "Sotto la soglia, se non è in carica, il microfono si chiude (sparisce anche il pallino verde). " +
+                "Riprende da solo quando metti in carica. Il tasto o gesto continua a funzionare."
         val linked = SpotifyAccount.isLinked(this)
         spotifyInfo.text = when {
             !Actions.spotifyInstalled(this) -> "Spotify non è installato."

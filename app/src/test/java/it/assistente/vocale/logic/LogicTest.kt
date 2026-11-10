@@ -195,6 +195,50 @@ class LogicTest {
         assertEquals(Command.Play(PlayRequest("vasco rossi", MediaFocus.ANY)), CommandParser.parse("metti vasco rossi"))
     }
 
+    /** Audio simulato: rumore di fondo + eventuale "voce" (sinusoide modulata) */
+    private fun audio(ms: Int, noise: Int, voice: Int = 0, seed: Int = 1): ShortArray {
+        val rnd = java.util.Random(seed.toLong())
+        val n = 16 * ms
+        return ShortArray(n) { i ->
+            val v = voice * kotlin.math.sin(i * 2 * Math.PI * 220 / 16000) * (0.6 + 0.4 * kotlin.math.sin(i * 2 * Math.PI * 4 / 16000))
+            (rnd.nextGaussian() * noise + v).toInt().coerceIn(-32768, 32767).toShort()
+        }
+    }
+
+    private fun run(d: VoiceDetector, a: ShortArray): Boolean {
+        var last = false
+        var i = 0
+        while (i < a.size) { val n = minOf(1600, a.size - i); last = d.process(a.copyOfRange(i, i + n), n); i += n }
+        return last
+    }
+
+    @Test fun rilevatoreDiVoce() {
+        val d = VoiceDetector(VoiceDetector.Sensitivity.MEDIUM)
+        // stanza silenziosa: resta spento
+        assertTrue(!run(d, audio(3000, noise = 60)))
+        // qualcuno parla: si accende
+        assertTrue(run(d, audio(600, noise = 60, voice = 3000, seed = 2)))
+        // subito dopo la frase resta acceso (pause tra le parole)
+        assertTrue(run(d, audio(300, noise = 60, seed = 3)))
+        // dopo oltre un secondo di silenzio si spegne
+        assertTrue(!run(d, audio(1500, noise = 60, seed = 4)))
+
+        // rumore costante forte (TV, motore): dopo un po' diventa "fondo" e il rilevatore si spegne
+        val tv = VoiceDetector(VoiceDetector.Sensitivity.MEDIUM)
+        run(tv, audio(1000, noise = 60, seed = 5))
+        run(tv, audio(30000, noise = 1500, seed = 6))
+        assertTrue(!run(tv, audio(1500, noise = 1500, seed = 7)))
+        // ma una voce più forte del fondo lo riaccende
+        assertTrue(run(tv, audio(600, noise = 1500, voice = 12000, seed = 8)))
+
+        // bassa sensibilità: una voce debole non basta, alta sensibilità sì
+        val low = VoiceDetector(VoiceDetector.Sensitivity.LOW)
+        val high = VoiceDetector(VoiceDetector.Sensitivity.HIGH)
+        run(low, audio(2000, noise = 200, seed = 9)); run(high, audio(2000, noise = 200, seed = 9))
+        assertTrue(!run(low, audio(600, noise = 200, voice = 1000, seed = 10)))
+        assertTrue(run(high, audio(600, noise = 200, voice = 1000, seed = 10)))
+    }
+
     @Test fun navigazione() {
         assertEquals(Command.Navigate("catania"), CommandParser.parse("portami a catania"))
         assertEquals(Command.Navigate("via etnea 120 catania"), CommandParser.parse("naviga verso via etnea cento venti catania"))

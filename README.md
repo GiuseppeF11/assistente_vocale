@@ -123,6 +123,19 @@ App registrata su developer.spotify.com con Redirect URI `assistente-vocale://ca
 Niente accesso alle notifiche: con quel permesso Play Protect blocca l'installazione degli APK scaricati
 dal browser. Lo stesso vale per lettura SMS e servizi di accessibilità: l'app non deve mai chiederli.
 
+## Risparmio energetico
+
+Quasi tutto il consumo dell'ascolto a voce viene dal riconoscitore (una piccola rete neurale), non dal microfono.
+
+- **Rilevatore di voce**: un filtro leggerissimo stima il rumore di fondo e accende il riconoscitore solo quando
+  qualcuno parla; all'accensione gli passa l'ultimo secondo già sentito, così l'inizio della frase non si perde.
+  Nel silenzio il microfono si legge a blocchi da 400 ms. Un rumore costante (TV, motore) diventa "fondo" in
+  qualche decina di secondi. Sensibilità alta / media (predefinita) / bassa, oppure disattivato.
+- **Pausa con batteria scarica**: sotto la soglia (predefinita 20%) e non in carica il microfono si chiude;
+  riprende in carica. Il tasto/gesto resta disponibile.
+
+Il microfono resta comunque aperto (pallino verde): per sentire la frase bisogna ascoltare.
+
 ## Calendario
 
 Gli eventi si scrivono direttamente nel calendario scelto nelle impostazioni (di default il principale

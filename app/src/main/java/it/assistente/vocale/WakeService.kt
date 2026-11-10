@@ -47,6 +47,7 @@ import it.assistente.vocale.logic.SpotifyItem
 import it.assistente.vocale.logic.Text
 import it.assistente.vocale.logic.TimeParser
 import it.assistente.vocale.logic.MediaFocus
+import it.assistente.vocale.logic.VoiceDetector
 import it.assistente.vocale.logic.WakeMatcher
 import org.json.JSONArray
 import org.json.JSONObject
@@ -82,6 +83,10 @@ class WakeService : Service(), AssistantBus.Controller {
         private const val SYSTEM_ASR_WATCHDOG_MS = 20000L
         /** audio tenuto in memoria per la verifica della frase di attivazione */
         private const val RING_SECONDS = 3
+        /** audio già sentito passato al riconoscitore quando il rilevatore si accende (l'inizio della frase) */
+        private const val PREROLL_SAMPLES = RATE_HZ
+        /** a riconoscitore spento si legge il microfono a blocchi più grandi: il processore si sveglia meno */
+        private const val IDLE_READ_SAMPLES = RATE_HZ * 4 / 10
         /** dopo un parziale con la frase, aspetta che la parola finisca prima di verificare */
         private const val VERIFY_AFTER_PARTIAL_MS = 400L
 
@@ -150,6 +155,16 @@ class WakeService : Service(), AssistantBus.Controller {
     // --- solo thread audio ---
     private var wakeRec: Recognizer? = null
     private val ring = AudioRing(RATE_HZ * RING_SECONDS)
+    /** null = rilevatore disattivato (riconoscitore sempre acceso) */
+    private var detector: VoiceDetector? = null
+    private var voiceActive = false
+    @Volatile private var detectorDirty = true
+    /** pausa per batteria scarica: microfono chiuso, resta il tasto/gesto */
+    @Volatile private var batteryPaused = false
+    private var batteryLevel = -1
+    private val batteryReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) = onBattery(i)
+    }
 
     // --- solo thread principale ---
     private var wakeLock: PowerManager.WakeLock? = null
@@ -233,10 +248,12 @@ class WakeService : Service(), AssistantBus.Controller {
         }
         asrLevel = Asr.ON_DEVICE
         biasingOk = true
+        detectorDirty = true
+        registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.let { onBattery(it) }
         tts?.shutdown()
         ttsReady = false
         initTts()
-        Notifications.refreshService(this)
+        Notifications.refreshService(this, if (batteryPaused) "In pausa: batteria scarica" else null)
         val inDialog = AssistantBus.state.phase != Phase.HIDDEN
         if (!inDialog) {
             if (!Prefs.voiceWake(this)) { stopSelf(); return }
@@ -246,10 +263,26 @@ class WakeService : Service(), AssistantBus.Controller {
         AssistantBus.status(statusText())
     }
 
-    private fun idleMode() = if (Prefs.voiceWake(this)) Mode.WAKE else Mode.IDLE
+    private fun idleMode() = if (Prefs.voiceWake(this) && !batteryPaused) Mode.WAKE else Mode.IDLE
 
-    private fun statusText() =
-        if (Prefs.voiceWake(this)) "In ascolto: di' «$wakePhrase»" else "Pronto (tasto o gesto)"
+    private fun statusText() = when {
+        !Prefs.voiceWake(this) -> "Pronto (tasto o gesto)"
+        batteryPaused -> "In pausa: batteria al $batteryLevel% (riprende in carica)"
+        else -> "In ascolto: di' «$wakePhrase»"
+    }
+
+    /** Batteria sotto la soglia e non in carica: si chiude il microfono finché non la ricarichi. */
+    private fun onBattery(i: Intent) {
+        val scale = i.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
+        batteryLevel = i.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) * 100 / scale
+        val charging = i.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) != 0
+        val pause = Prefs.batteryPause(this) && !charging && batteryLevel in 0..Prefs.batteryThreshold(this)
+        if (pause == batteryPaused) return
+        batteryPaused = pause
+        if (AssistantBus.state.phase == Phase.HIDDEN) mode = idleMode()
+        Notifications.refreshService(this, if (pause) "In pausa: batteria scarica" else null)
+        AssistantBus.status(statusText())
+    }
 
     private fun startEngine() {
         alive = true
@@ -266,6 +299,8 @@ class WakeService : Service(), AssistantBus.Controller {
 
         initTts()
         refreshContacts()
+        registerReceiver(batteryReceiver, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.let { onBattery(it) }
+        mode = idleMode()
 
         audioThread = Thread({ runEngine() }, "assistente-audio").apply { start() }
     }
@@ -277,6 +312,7 @@ class WakeService : Service(), AssistantBus.Controller {
         main.removeCallbacksAndMessages(null)
         destroySystemRecognizer()
         releaseAudioFocus()
+        try { unregisterReceiver(batteryReceiver) } catch (_: Exception) { }
         overlay.remove()
         audioThread?.join(800)
         tts?.shutdown()
@@ -465,25 +501,49 @@ class WakeService : Service(), AssistantBus.Controller {
 
     /** Legge il microfono finché non lo si deve cedere al riconoscitore di sistema. */
     private fun capture(rec: AudioRecord, model: Model, cmd: Recognizer) {
-        val buf = ShortArray(RATE_HZ / 10) // 100 ms
+        val buf = ShortArray(IDLE_READ_SAMPLES)
         var listenStart = SystemClock.elapsedRealtime()
         var lastPartial = ""
         var verifyAt = 0L
         resetRequested = true
+
+        /** passa audio al rilevatore a grammatica e aggiorna il candidato da verificare */
+        fun wakeStep(wake: Recognizer, chunk: ShortArray, len: Int, now: Long) {
+            val final = wake.acceptWaveForm(chunk, len)
+            val heard = Text.spoken(if (final) field(wake.result, "text") else field(wake.partialResult, "partial"))
+            if (heard.isNotEmpty() && !final) AssistantBus.heard(heard)
+            // 1° livello: il rilevatore a grammatica crede di aver sentito la frase
+            val candidate = heard.contains(wakePhrase)
+            if (candidate) {
+                if (final) verifyAt = now
+                else if (verifyAt == 0L) verifyAt = now + VERIFY_AFTER_PARTIAL_MS
+            } else if (final) {
+                verifyAt = 0L
+            }
+        }
         while (alive && mode != Mode.EXTERNAL && mode != Mode.IDLE) {
             if (wakeDirty) {
                 wakeDirty = false
                 wakeRec?.close()
                 wakeRec = newWakeRecognizer(model)
             }
+            if (detectorDirty) {
+                detectorDirty = false
+                detector = Prefs.voiceDetector(this)?.let { VoiceDetector(it, RATE_HZ) }
+                voiceActive = false
+            }
             val wake = wakeRec ?: return
-            val n = rec.read(buf, 0, buf.size)
+            // in attesa e nel silenzio: blocchi da 400 ms; altrimenti da 100 ms per reagire subito
+            val idle = mode == Mode.WAKE && detector != null && !voiceActive
+            val n = rec.read(buf, 0, if (idle) IDLE_READ_SAMPLES else RATE_HZ / 10)
             if (n <= 0) { SystemClock.sleep(200); continue }
             val now = SystemClock.elapsedRealtime()
             if (resetRequested) {
                 resetRequested = false
                 wake.reset(); cmd.reset()
                 ring.clear()
+                detector?.reset()
+                voiceActive = false
                 verifyAt = 0L
                 listenStart = now
                 lastPartial = ""
@@ -496,17 +556,22 @@ class WakeService : Service(), AssistantBus.Controller {
 
                 Mode.WAKE -> {
                     ring.write(buf, n)
-                    val final = wake.acceptWaveForm(buf, n)
-                    val heard = Text.spoken(if (final) field(wake.result, "text") else field(wake.partialResult, "partial"))
-                    if (heard.isNotEmpty() && !final) AssistantBus.heard(heard)
-
-                    // 1° livello: il rilevatore a grammatica crede di aver sentito la frase
-                    val candidate = heard.contains(wakePhrase)
-                    if (candidate) {
-                        if (final) verifyAt = now
-                        else if (verifyAt == 0L) verifyAt = now + VERIFY_AFTER_PARTIAL_MS
-                    } else if (final) {
-                        verifyAt = 0L
+                    val was = voiceActive
+                    // rilevatore di voce: il riconoscitore lavora solo quando qualcuno parla
+                    voiceActive = detector?.process(buf, n) ?: true
+                    when {
+                        voiceActive && !was -> {
+                            // si accende: prima l'ultimo secondo già sentito, così l'inizio della frase non si perde
+                            wake.reset()
+                            ring.forEachChunk(RATE_HZ / 10, PREROLL_SAMPLES) { c, l -> wakeStep(wake, c, l, now) }
+                        }
+                        voiceActive -> wakeStep(wake, buf, n, now)
+                        was -> {
+                            // fine del parlato: si chiude la frase e si controlla l'ultima ipotesi
+                            val heard = Text.spoken(field(wake.finalResult, "text"))
+                            if (heard.contains(wakePhrase)) verifyAt = now
+                            else if (verifyAt == 0L) wake.reset()
+                        }
                     }
 
                     // 2° livello: lo stesso audio riascoltato con tutto il vocabolario
@@ -1349,10 +1414,12 @@ private class AudioRing(size: Int) {
 
     fun clear() { filled = 0 }
 
-    fun forEachChunk(chunk: Int, block: (ShortArray, Int) -> Unit) {
+    /** Gli ultimi [last] campioni (tutti, se non indicato), a blocchi di [chunk]. */
+    fun forEachChunk(chunk: Int, last: Int = filled, block: (ShortArray, Int) -> Unit) {
         val tmp = ShortArray(chunk)
-        var start = (pos - filled + data.size) % data.size
-        var left = filled
+        val count = minOf(last, filled)
+        var start = (pos - count + data.size) % data.size
+        var left = count
         while (left > 0) {
             val len = minOf(chunk, left)
             for (k in 0 until len) tmp[k] = data[(start + k) % data.size]
