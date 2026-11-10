@@ -55,6 +55,16 @@ object Prefs {
     /** Frase di attivazione attiva: modalità a voce (o entrambe) e ascolto acceso dall'utente. */
     fun voiceWake(c: Context) = activation(c) != Activation.GESTURE && enabled(c)
 
+    // segnale quando inizia l'ascolto
+    fun feedbackSound(c: Context): Feedback.Sound =
+        runCatching { Feedback.Sound.valueOf(sp(c).getString("fb_sound", "BEEP")!!) }.getOrDefault(Feedback.Sound.BEEP)
+    fun feedbackUri(c: Context): String? = sp(c).getString("fb_uri", null)
+    fun feedbackVolume(c: Context): Int = sp(c).getInt("fb_volume", 80)
+    fun feedbackVibrate(c: Context): Boolean = sp(c).getBoolean("fb_vibrate", false)
+    fun setFeedback(c: Context, sound: Feedback.Sound, uri: String?, volume: Int, vibrate: Boolean) = sp(c).edit()
+        .putString("fb_sound", sound.name).putString("fb_uri", uri)
+        .putInt("fb_volume", volume).putBoolean("fb_vibrate", vibrate).apply()
+
     // voce dell'assistente: null = automatico
     fun ttsEngine(c: Context): String? = sp(c).getString("tts_engine", null)
     fun ttsVoice(c: Context): String? = sp(c).getString("tts_voice", null)
@@ -209,6 +219,33 @@ object Actions {
         main.postDelayed(check, 800)
     }
 
+    /** Sveglia nell'app Orologio, senza aprirla. */
+    fun setAlarm(c: Context, hour: Int, minute: Int): Boolean = startQuietly(
+        c,
+        Intent(android.provider.AlarmClock.ACTION_SET_ALARM)
+            .putExtra(android.provider.AlarmClock.EXTRA_HOUR, hour)
+            .putExtra(android.provider.AlarmClock.EXTRA_MINUTES, minute)
+            .putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, "Assistente")
+            .putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true),
+    )
+
+    /** Timer nell'app Orologio, senza aprirla. */
+    fun setTimer(c: Context, seconds: Int): Boolean = startQuietly(
+        c,
+        Intent(android.provider.AlarmClock.ACTION_SET_TIMER)
+            .putExtra(android.provider.AlarmClock.EXTRA_LENGTH, seconds.coerceIn(1, 86400))
+            .putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, "Assistente")
+            .putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true),
+    )
+
+    private fun startQuietly(c: Context, intent: Intent): Boolean = try {
+        c.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        true
+    } catch (e: Exception) {
+        Log.w(TAG, "Orologio", e)
+        false
+    }
+
     const val SPOTIFY = "com.spotify.music"
 
     fun spotifyInstalled(c: Context) = c.packageManager.getLaunchIntentForPackage(SPOTIFY) != null
@@ -217,32 +254,39 @@ object Actions {
      * Chiede a Spotify di cercare e riprodurre (lo stesso meccanismo usato dagli assistenti vocali).
      * Se la versione installata non lo accetta, apre almeno la ricerca.
      */
-    fun play(c: Context, req: PlayRequest): Boolean {
-        val focus = when (req.focus) {
-            MediaFocus.SONG -> "vnd.android.cursor.item/audio"
-            MediaFocus.ARTIST -> MediaStore.Audio.Artists.ENTRY_CONTENT_TYPE
-            MediaFocus.ALBUM -> MediaStore.Audio.Albums.ENTRY_CONTENT_TYPE
-            MediaFocus.PLAYLIST -> MediaStore.Audio.Playlists.ENTRY_CONTENT_TYPE
-            MediaFocus.ANY -> "vnd.android.cursor.item/*"
+    /** Parametri della ricerca vocale (stessi per l'intent e per il lettore di Spotify). */
+    @Suppress("DEPRECATION")
+    fun searchExtras(req: PlayRequest): Bundle = Bundle().apply {
+        putString(SearchManager.QUERY, req.query)
+        putString(
+            MediaStore.EXTRA_MEDIA_FOCUS,
+            when (req.focus) {
+                MediaFocus.SONG -> "vnd.android.cursor.item/audio"
+                MediaFocus.ARTIST -> MediaStore.Audio.Artists.ENTRY_CONTENT_TYPE
+                MediaFocus.ALBUM -> MediaStore.Audio.Albums.ENTRY_CONTENT_TYPE
+                MediaFocus.PLAYLIST -> MediaStore.Audio.Playlists.ENTRY_CONTENT_TYPE
+                MediaFocus.ANY -> "vnd.android.cursor.item/*"
+            }
+        )
+        when (req.focus) {
+            MediaFocus.SONG -> putString(MediaStore.EXTRA_MEDIA_TITLE, req.query)
+            MediaFocus.ARTIST -> putString(MediaStore.EXTRA_MEDIA_ARTIST, req.query)
+            MediaFocus.ALBUM -> putString(MediaStore.EXTRA_MEDIA_ALBUM, req.query)
+            MediaFocus.PLAYLIST -> putString(MediaStore.EXTRA_MEDIA_PLAYLIST, req.query)
+            MediaFocus.ANY -> Unit
         }
+    }
+
+    /** Ripiego: apre Spotify sulla ricerca (non fa partire la musica da solo). */
+    fun play(c: Context, req: PlayRequest): Boolean {
         val playIntent = Intent(MediaStore.INTENT_ACTION_MEDIA_PLAY_FROM_SEARCH)
             .setPackage(SPOTIFY)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            .putExtra(SearchManager.QUERY, req.query)
-            .putExtra(MediaStore.EXTRA_MEDIA_FOCUS, focus)
-            .apply {
-                when (req.focus) {
-                    MediaFocus.SONG -> putExtra(MediaStore.EXTRA_MEDIA_TITLE, req.query)
-                    MediaFocus.ARTIST -> putExtra(MediaStore.EXTRA_MEDIA_ARTIST, req.query)
-                    MediaFocus.ALBUM -> putExtra(MediaStore.EXTRA_MEDIA_ALBUM, req.query)
-                    MediaFocus.PLAYLIST -> putExtra(MediaStore.EXTRA_MEDIA_PLAYLIST, req.query)
-                    MediaFocus.ANY -> Unit
-                }
-            }
+            .putExtras(searchExtras(req))
         val search = Intent(Intent.ACTION_VIEW, Uri.parse("spotify:search:" + Uri.encode(req.query)))
             .setPackage(SPOTIFY)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        for (intent in listOf(playIntent, search)) {
+        for (intent in listOf(search, playIntent)) {
             try { c.startActivity(intent); return true } catch (_: ActivityNotFoundException) { }
         }
         return false
@@ -379,5 +423,79 @@ object Recognizers {
         val best = services.minByOrNull { preferred.indexOf(it.packageName).let { i -> if (i < 0) 99 else i } }
             ?: return null
         return ComponentName(best.packageName, best.name)
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+
+/** Segnale "ti ascolto": tono, suono a scelta del telefono, nessun suono; più vibrazione facoltativa. */
+class Feedback(private val c: Context) {
+
+    enum class Sound(val label: String, val tone: Int, val durationMs: Int) {
+        BEEP("Bip", android.media.ToneGenerator.TONE_PROP_BEEP, 150),
+        DOUBLE("Doppio bip", android.media.ToneGenerator.TONE_PROP_BEEP2, 300),
+        ACK("Conferma", android.media.ToneGenerator.TONE_PROP_ACK, 250),
+        PIP("Pip breve", android.media.ToneGenerator.TONE_CDMA_PIP, 120),
+        CUSTOM("Suono del telefono…", -1, 0),
+        NONE("Nessun suono", -1, 0),
+    }
+
+    private var tone: android.media.ToneGenerator? = null
+    private var toneVolume = -1
+    private var player: android.media.MediaPlayer? = null
+    private val main = Handler(Looper.getMainLooper())
+
+    /** Suona/vibra secondo le impostazioni. Restituisce per quanti ms il suono occupa l'audio. */
+    fun play(): Int {
+        if (Prefs.feedbackVibrate(c)) vibrate()
+        val volume = Prefs.feedbackVolume(c)
+        if (volume <= 0) return 0
+        return when (val sound = Prefs.feedbackSound(c)) {
+            Sound.NONE -> 0
+            Sound.CUSTOM -> playUri(Prefs.feedbackUri(c), volume)
+            else -> playTone(sound, volume)
+        }
+    }
+
+    private fun playTone(sound: Sound, volume: Int): Int {
+        if (tone == null || toneVolume != volume) {
+            tone?.release()
+            tone = try { android.media.ToneGenerator(AudioManager.STREAM_MUSIC, volume) } catch (e: RuntimeException) { null }
+            toneVolume = volume
+        }
+        tone?.startTone(sound.tone, sound.durationMs)
+        return sound.durationMs
+    }
+
+    /** Suoni di notifica del telefono: troncati a 1,2 s per non coprire la voce. */
+    private fun playUri(uri: String?, volume: Int): Int {
+        if (uri == null) return playTone(Sound.BEEP, volume)
+        player?.release()
+        val mp = try { android.media.MediaPlayer.create(c, Uri.parse(uri)) } catch (e: Exception) { null }
+            ?: return playTone(Sound.BEEP, volume)
+        val v = volume / 100f
+        mp.setVolume(v, v)
+        mp.setOnCompletionListener { it.release(); if (player === it) player = null }
+        mp.start()
+        player = mp
+        val length = mp.duration.takeIf { it > 0 }?.coerceAtMost(1200) ?: 800
+        main.postDelayed({ if (player === mp) { try { mp.stop() } catch (_: Exception) { }; mp.release(); player = null } }, length.toLong())
+        return length
+    }
+
+    private fun vibrate() {
+        val vib = if (android.os.Build.VERSION.SDK_INT >= 31) {
+            c.getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION") c.getSystemService(android.os.Vibrator::class.java)
+        }
+        try {
+            vib?.vibrate(android.os.VibrationEffect.createOneShot(70, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
+        } catch (e: Exception) { Log.w(TAG, "Vibrazione", e) }
+    }
+
+    fun release() {
+        tone?.release(); tone = null
+        player?.release(); player = null
     }
 }

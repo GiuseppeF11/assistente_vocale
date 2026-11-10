@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.app.role.RoleManager
 import android.content.Intent
+import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -47,6 +48,12 @@ class MainActivity : Activity() {
     private lateinit var voiceSpinner: Spinner
     private lateinit var rateBar: SeekBar
     private lateinit var rateLabel: TextView
+    private lateinit var fbSound: Spinner
+    private lateinit var fbVolume: SeekBar
+    private lateinit var fbVolumeLabel: TextView
+    private lateinit var fbVibrate: Switch
+    private lateinit var spotifyInfo: TextView
+    private val feedbackPreview by lazy { Feedback(this) }
     private var languageInfo = ""
     private var voiceInfo = ""
 
@@ -90,6 +97,11 @@ class MainActivity : Activity() {
         rateLabel = findViewById(R.id.tts_rate_label)
         setupActivation()
         setupVoice()
+        setupFeedback()
+        spotifyInfo = findViewById(R.id.spotify_info)
+        findViewById<Button>(R.id.spotify_access).setOnClickListener {
+            open(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }
 
         home.setText(Prefs.home(this))
         work.setText(Prefs.work(this))
@@ -155,6 +167,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         probe?.destroy()
         preview?.shutdown()
+        feedbackPreview.release()
         super.onDestroy()
     }
 
@@ -206,6 +219,87 @@ class MainActivity : Activity() {
     private fun isAssistant(): Boolean = try {
         getSystemService(RoleManager::class.java).isRoleHeld(RoleManager.ROLE_ASSISTANT)
     } catch (e: Exception) { false }
+
+    // ---- segnale di ascolto ----
+
+    private val pickSound = 7
+
+    private fun setupFeedback() {
+        fbSound = findViewById(R.id.fb_sound)
+        fbVolume = findViewById(R.id.fb_volume)
+        fbVolumeLabel = findViewById(R.id.fb_volume_label)
+        fbVibrate = findViewById(R.id.fb_vibrate)
+
+        fbVolume.progress = Prefs.feedbackVolume(this)
+        fbVibrate.isChecked = Prefs.feedbackVibrate(this)
+        bindSounds()
+        fbVolume.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) = showFeedback()
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) { saveFeedback(); feedbackPreview.play() }
+        })
+        fbVibrate.setOnCheckedChangeListener { _, _ -> saveFeedback() }
+        findViewById<Button>(R.id.fb_test).setOnClickListener { feedbackPreview.play() }
+        showFeedback()
+    }
+
+    private fun bindSounds() {
+        val sounds = Feedback.Sound.values().toList()
+        bindSpinner(fbSound, sounds.map { soundLabel(it) }, sounds.indexOf(Prefs.feedbackSound(this))) { i ->
+            val sound = sounds[i]
+            if (sound == Feedback.Sound.CUSTOM) pickPhoneSound() else { saveFeedback(sound = sound); feedbackPreview.play() }
+        }
+    }
+
+    private fun soundLabel(s: Feedback.Sound): String {
+        if (s != Feedback.Sound.CUSTOM) return s.label
+        val uri = Prefs.feedbackUri(this) ?: return s.label
+        val title = try { RingtoneManager.getRingtone(this, Uri.parse(uri))?.getTitle(this) } catch (e: Exception) { null }
+        return if (title != null) "Suono del telefono: $title" else s.label
+    }
+
+    private fun saveFeedback(
+        sound: Feedback.Sound = Prefs.feedbackSound(this),
+        uri: String? = Prefs.feedbackUri(this),
+    ) {
+        Prefs.setFeedback(this, sound, uri, fbVolume.progress, fbVibrate.isChecked)
+        showFeedback()
+    }
+
+    private fun showFeedback() {
+        val none = Prefs.feedbackSound(this) == Feedback.Sound.NONE
+        fbVolume.isEnabled = !none
+        fbVolumeLabel.text = when {
+            none -> "Volume: suono disattivato"
+            fbVolume.progress == 0 -> "Volume: 0 (muto)"
+            else -> "Volume: ${fbVolume.progress}% del volume multimediale"
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun pickPhoneSound() {
+        val intent = Intent(RingtoneManager.ACTION_RINGTONE_PICKER)
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_TYPE, RingtoneManager.TYPE_NOTIFICATION)
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_TITLE, "Segnale di ascolto")
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_SILENT, false)
+            .putExtra(RingtoneManager.EXTRA_RINGTONE_SHOW_DEFAULT, true)
+        Prefs.feedbackUri(this)?.let { intent.putExtra(RingtoneManager.EXTRA_RINGTONE_EXISTING_URI, Uri.parse(it)) }
+        try { startActivityForResult(intent, pickSound) } catch (e: Exception) { saveFeedback(sound = Feedback.Sound.BEEP) }
+    }
+
+    @Deprecated("Deprecated in Java")
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != pickSound) return
+        val uri = if (resultCode == RESULT_OK) data?.getParcelableExtra<Uri>(RingtoneManager.EXTRA_RINGTONE_PICKED_URI) else null
+        if (uri != null) {
+            saveFeedback(sound = Feedback.Sound.CUSTOM, uri = uri.toString())
+            feedbackPreview.play()
+        }
+        // mostra il nome del suono scelto, oppure torna alla scelta precedente se annullato
+        bindSounds()
+    }
 
     // ---- voce ----
 
@@ -420,6 +514,15 @@ class MainActivity : Activity() {
         }
         asrInfo.text = asrDescription()
         downloadIt.visibility = if (Prefs.systemAsr(this)) View.VISIBLE else View.GONE
+        spotifyInfo.text = when {
+            !Actions.spotifyInstalled(this) -> "Spotify non è installato."
+            SpotifyPlayer.hasAccess(this) ->
+                "✓ La musica parte da sola, anche a telefono bloccato. Prova: «metti Albachiara da Spotify»."
+            else -> "✗ Senza questo permesso Spotify apre solo la ricerca. Tocca il pulsante e attiva " +
+                "«${getString(R.string.app_name)}» in «Accesso alle notifiche». Se Android dice «Impostazione " +
+                "limitata»: Impostazioni → App → ${getString(R.string.app_name)} → menu ⋮ in alto → " +
+                "«Consenti impostazioni limitate», poi riprova."
+        }
         ttsInfo.text = listOf(voiceInfo, AssistantBus.ttsStatus).filter { it.isNotEmpty() }.joinToString("\n")
         findViewById<TextView>(R.id.howto).text = getString(R.string.howto, Prefs.wakePhrase(this))
     }

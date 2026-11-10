@@ -42,6 +42,8 @@ import it.assistente.vocale.logic.NumberKind
 import it.assistente.vocale.logic.PhoneNumber
 import it.assistente.vocale.logic.PlayRequest
 import it.assistente.vocale.logic.Text
+import it.assistente.vocale.logic.TimeParser
+import it.assistente.vocale.logic.MediaFocus
 import it.assistente.vocale.logic.WakeMatcher
 import org.json.JSONArray
 import org.json.JSONObject
@@ -114,6 +116,8 @@ class WakeService : Service(), AssistantBus.Controller {
         data object WhoToCall : Pending
         data object WhereToGo : Pending
         data object WhatToPlay : Pending
+        data object AlarmWhen : Pending
+        data object TimerHowLong : Pending
         data class PickContact(val candidates: List<Contact>, val kind: NumberKind?) : Pending
         data class PickNumber(val contact: Contact, val numbers: List<PhoneNumber>) : Pending
     }
@@ -142,7 +146,9 @@ class WakeService : Service(), AssistantBus.Controller {
     private var wakeLock: PowerManager.WakeLock? = null
     private var tts: TextToSpeech? = null
     private var ttsReady = false
-    private var tone: ToneGenerator? = null
+    private val feedback by lazy { Feedback(this) }
+    /** cambia a ogni chiusura del dialogo: scarta i risultati arrivati dopo (es. Spotify) */
+    private var actionSeq = 0
     private var utteranceSeq = 0
     private var afterSpeech: Pair<String, () -> Unit>? = null
     private var pending: Pending = Pending.Fresh
@@ -245,7 +251,6 @@ class WakeService : Service(), AssistantBus.Controller {
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "assistente:ascolto")
             .apply { setReferenceCounted(false); acquire() }
 
-        tone = try { ToneGenerator(AudioManager.STREAM_MUSIC, 90) } catch (e: RuntimeException) { null }
         initTts()
         refreshContacts()
 
@@ -261,7 +266,7 @@ class WakeService : Service(), AssistantBus.Controller {
         overlay.remove()
         audioThread?.join(800)
         tts?.shutdown()
-        tone?.release()
+        feedback.release()
         wakeLock?.release()
         if (AssistantBus.controller === this) AssistantBus.controller = null
         Notifications.cancelWake(this)
@@ -347,9 +352,8 @@ class WakeService : Service(), AssistantBus.Controller {
         waiting.second()
     }
 
-    private fun beep() {
-        tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
-    }
+    /** Segnale "ti ascolto"; restituisce i ms per cui non bisogna registrare. */
+    private fun beep(): Int = feedback.play()
 
     // =============================================================================================
     // Thread audio (Vosk)
@@ -587,8 +591,8 @@ class WakeService : Service(), AssistantBus.Controller {
         if (!alive || seq != listenSeq) return
         if (asr == Asr.VOSK) {
             voskNeeded = true
-            beep()
-            muteUntil = SystemClock.elapsedRealtime() + 300
+            val busy = beep()
+            muteUntil = SystemClock.elapsedRealtime() + busy + 150
             resetRequested = true
             mode = Mode.COMMAND
             return
@@ -603,9 +607,9 @@ class WakeService : Service(), AssistantBus.Controller {
                 if (!micReleased && SystemClock.elapsedRealtime() < deadline) {
                     main.postDelayed(this, 40); return
                 }
-                beep()
+                val busy = beep()
                 // il segnale non deve finire nella registrazione
-                main.postDelayed({ startSystemRecognizer(asr, seq) }, 220)
+                main.postDelayed({ startSystemRecognizer(asr, seq) }, busy + 70L)
             }
         }
         main.post(waitMic)
@@ -714,7 +718,7 @@ class WakeService : Service(), AssistantBus.Controller {
     private fun biasingStrings(): ArrayList<String> {
         val list = arrayListOf(
             "chiama", "telefona", "portami", "naviga", "vivavoce", "cellulare", "casa", "lavoro", "annulla",
-            "metti", "spotify", "album", "playlist",
+            "metti", "spotify", "album", "playlist", "sveglia", "svegliami", "timer",
         )
         contacts.asSequence().map { it.name }.take(150).forEach { list.add(it) }
         return list
@@ -771,8 +775,13 @@ class WakeService : Service(), AssistantBus.Controller {
                 Command.NavigateWhere -> ask("Dove vuoi andare?", Pending.WhereToGo)
                 is Command.Play -> play(cmd.request)
                 Command.PlayWhat -> ask("Cosa vuoi ascoltare?", Pending.WhatToPlay)
+                is Command.Alarm -> alarm(cmd.hour, cmd.minute)
+                is Command.AlarmIn -> alarmIn(cmd.seconds)
+                Command.AlarmWhen -> ask("A che ora?", Pending.AlarmWhen)
+                is Command.Timer -> timer(cmd.seconds)
+                Command.TimerHowLong -> ask("Per quanto tempo?", Pending.TimerHowLong)
                 else -> ask(
-                    "Non ho capito. Puoi dire «chiama» e un nome, «portami a» e un posto, oppure «metti» e una canzone.",
+                    "Non ho capito. Puoi chiamare, farti portare in un posto, mettere musica, una sveglia o un timer.",
                     Pending.Fresh, misunderstood = true,
                 )
             }
@@ -790,6 +799,25 @@ class WakeService : Service(), AssistantBus.Controller {
                 is Command.Navigate -> navigate(cmd.destination)
                 is Command.Call -> resolveCall(cmd.target, cmd.kind)
                 else -> navigate(CommandParser.destination(text))
+            }
+
+            Pending.AlarmWhen -> when (cmd) {
+                is Command.Alarm -> alarm(cmd.hour, cmd.minute)
+                is Command.AlarmIn -> alarmIn(cmd.seconds)
+                else -> {
+                    val c = TimeParser.clock(text)
+                    if (c != null) alarm(c.hour, c.minute)
+                    else ask("Non ho capito l'orario. A che ora?", Pending.AlarmWhen, misunderstood = true)
+                }
+            }
+
+            Pending.TimerHowLong -> when (cmd) {
+                is Command.Timer -> timer(cmd.seconds)
+                else -> {
+                    val d = TimeParser.duration(text)
+                    if (d != null) timer(d)
+                    else ask("Non ho capito. Per quanto tempo?", Pending.TimerHowLong, misunderstood = true)
+                }
             }
 
             Pending.WhatToPlay -> when (cmd) {
@@ -839,8 +867,8 @@ class WakeService : Service(), AssistantBus.Controller {
                 when (val c = CommandParser.parse(t)) {
                     Command.Cancel -> 4
                     is Command.Call -> 1 + contactScore(c.target)
-                    is Command.Navigate, is Command.Play -> 2
-                    Command.CallWho, Command.NavigateWhere, Command.PlayWhat -> 1
+                    is Command.Navigate, is Command.Play, is Command.Alarm, is Command.AlarmIn, is Command.Timer -> 2
+                    Command.CallWho, Command.NavigateWhere, Command.PlayWhat, Command.AlarmWhen, Command.TimerHowLong -> 1
                     else -> 0
                 }
             }
@@ -849,6 +877,8 @@ class WakeService : Service(), AssistantBus.Controller {
             is Pending.PickNumber -> best {
                 if (ChoiceParser.kind(it) != null || ChoiceParser.pick(it, p.numbers.map { n -> n.label }) != null) 1 else 0
             }
+            Pending.AlarmWhen -> best { if (TimeParser.clock(it) != null) 1 else 0 }
+            Pending.TimerHowLong -> best { if (TimeParser.duration(it) != null) 1 else 0 }
             Pending.WhereToGo, Pending.WhatToPlay -> texts[0]
         }
     }
@@ -962,6 +992,38 @@ class WakeService : Service(), AssistantBus.Controller {
         launchApp(AssistantBus.Launch.Navigate(destination), "Navigazione verso $shown", "Nessuna app di navigazione trovata.")
     }
 
+    // ---- sveglia e timer ----
+
+    private fun alarm(hour: Int, minute: Int) {
+        val time = "%d:%02d".format(hour, minute)
+        if (Actions.setAlarm(this, hour, minute)) confirm("Sveglia alle $time")
+        else finish("Non trovo un'app Orologio per la sveglia.", error = true)
+    }
+
+    private fun alarmIn(seconds: Int) {
+        val at = java.util.Calendar.getInstance().apply { add(java.util.Calendar.SECOND, seconds) }
+        val hour = at.get(java.util.Calendar.HOUR_OF_DAY)
+        val minute = at.get(java.util.Calendar.MINUTE)
+        val time = "%d:%02d".format(hour, minute)
+        if (Actions.setAlarm(this, hour, minute)) confirm("Sveglia alle $time, tra ${TimeParser.describe(seconds)}")
+        else finish("Non trovo un'app Orologio per la sveglia.", error = true)
+    }
+
+    private fun timer(seconds: Int) {
+        val what = TimeParser.describe(seconds)
+        if (Actions.setTimer(this, seconds)) confirm("Timer di $what avviato")
+        else finish("Non trovo un'app Orologio per il timer.", error = true)
+    }
+
+    /** Azione riuscita: conferma a voce e a schermo, poi il popup sparisce. */
+    private fun confirm(message: String) {
+        AssistantBus.post(UiState(Phase.DONE, message, transcript))
+        speak(message)
+        backToWake()
+        main.removeCallbacks(hideRunnable)
+        main.postDelayed(hideRunnable, 2000)
+    }
+
     // ---- musica ----
 
     private fun play(req: PlayRequest) {
@@ -969,12 +1031,32 @@ class WakeService : Service(), AssistantBus.Controller {
             finish("Spotify non è installato.", error = true); return
         }
         val what = when (req.focus) {
-            it.assistente.vocale.logic.MediaFocus.ALBUM -> "l'album ${req.query}"
-            it.assistente.vocale.logic.MediaFocus.PLAYLIST -> "la playlist ${req.query}"
+            MediaFocus.ALBUM -> "l'album ${req.query}"
+            MediaFocus.PLAYLIST -> "la playlist ${req.query}"
             else -> req.query
         }
-        speak("Metto $what su Spotify")
-        launchApp(AssistantBus.Launch.Play(req), "Spotify: $what", "Non riesco ad aprire Spotify.")
+        AssistantBus.post(UiState(Phase.WORKING, "Spotify: $what", transcript))
+        mode = idleMode()
+        val seq = actionSeq
+        speak("Metto $what su Spotify") {
+            if (!alive || seq != actionSeq) return@speak
+            SpotifyPlayer.play(this, req, canOpenUi = !isLocked()) { result ->
+                if (!alive || seq != actionSeq) return@play
+                when (result) {
+                    SpotifyPlayer.Result.PLAYING -> hide()
+                    SpotifyPlayer.Result.NO_ACCESS -> launchApp(
+                        AssistantBus.Launch.Play(req),
+                        "Apro la ricerca. Per far partire la musica da sola consenti l'accesso dalle impostazioni dell'app.",
+                        "Non riesco ad aprire Spotify.",
+                    )
+                    SpotifyPlayer.Result.NOT_STARTED -> launchApp(
+                        AssistantBus.Launch.Play(req),
+                        "Spotify non è partito da solo: apro la ricerca.",
+                        "Non riesco ad aprire Spotify.",
+                    )
+                }
+            }
+        }
     }
 
     /**
@@ -987,7 +1069,8 @@ class WakeService : Service(), AssistantBus.Controller {
             backToWake()
             if (Actions.run(this, launch)) {
                 main.removeCallbacks(hideRunnable)
-                main.postDelayed(hideRunnable, 1200)
+                // un messaggio lungo (es. spiegazione Spotify) resta visibile più a lungo
+                main.postDelayed(hideRunnable, if (message.length > 40) 3500 else 1200)
             } else {
                 finish(failure, error = true)
             }
@@ -1024,6 +1107,7 @@ class WakeService : Service(), AssistantBus.Controller {
     }
 
     private fun hide() {
+        actionSeq++
         main.removeCallbacks(hideRunnable)
         Notifications.cancelWake(this)
         AssistantBus.hide()

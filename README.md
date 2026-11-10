@@ -1,6 +1,7 @@
 # Assistente Vocale (Android, offline)
 
-Assistente vocale leggero che fa tre cose: **chiamare**, **avviare la navigazione** e **mettere musica su Spotify**.
+Assistente vocale leggero: **chiamare**, **avviare la navigazione**, **mettere musica su Spotify**,
+**impostare sveglie e timer**.
 Frase di attivazione riconosciuta da Vosk, sempre in locale. I comandi li capisce il riconoscitore
 vocale del telefono (Google, sul dispositivo e offline quando l'italiano è scaricato), con Vosk come riserva.
 
@@ -31,6 +32,10 @@ vocale del telefono (Google, sul dispositivo e offline quando l'italiano è scar
 | «metti Albachiara da Spotify» | cerca e riproduce su Spotify |
 | «metti l'album Nevermind» / «la playlist Relax» / «qualcosa dei Coldplay» | album, playlist, artista |
 | «metti» | «Cosa vuoi ascoltare?» |
+| «sveglia alle sette e mezza» / «alle 7 meno un quarto di sera» | sveglia nell'app Orologio |
+| «svegliami tra 20 minuti» | sveglia all'orario calcolato |
+| «timer di 5 minuti» / «di un'ora e mezza» / «avvisami tra 10 minuti» | timer nell'app Orologio |
+| «metti una sveglia» / «metti un timer» | «A che ora?» / «Per quanto tempo?» |
 | «annulla», «lascia stare» | chiude |
 
 Alle domande si risponde a voce («Rossi», «il secondo», «cellulare») oppure toccando l'opzione.
@@ -79,8 +84,20 @@ Nell'app si scelgono motore (Google, Samsung, …), voce italiana e velocità, c
 
 ## Spotify
 
-L'app chiede a Spotify di cercare e riprodurre, con lo stesso meccanismo usato dagli assistenti vocali.
-Se la versione di Spotify non lo accetta, si apre almeno la ricerca. A telefono bloccato serve prima lo sblocco.
+Il comando standard di Android («cerca e riproduci») Spotify lo tratta come una semplice ricerca. Per far
+partire davvero la musica l'app parla con il **lettore di Spotify** (la sessione multimediale, quella che
+si controlla dalla tendina) e gli chiede la ricerca vocale, come fanno Android Auto e gli assistenti:
+funziona anche a telefono bloccato e senza aprire Spotify. Se Spotify è chiuso, lo si sveglia con il
+tasto «play» (per un attimo riprende l'ultimo brano) e poi si chiede il brano giusto.
+
+Serve l'**accesso alle notifiche** (pulsante nell'app). Su Android 13+ per le app installate da APK compare
+«Impostazione limitata»: Impostazioni → App → Assistente Vocale → menu ⋮ → «Consenti impostazioni limitate».
+Senza il permesso, o se Spotify ignora la richiesta, si apre la ricerca.
+
+## Segnale di ascolto
+
+Tipo di suono (bip, doppio bip, conferma, pip, un suono di notifica del telefono, nessuno), volume
+(relativo al volume multimediale) e vibrazione facoltativa. La registrazione parte quando il suono è finito.
 
 ## Frase di attivazione: doppia verifica
 

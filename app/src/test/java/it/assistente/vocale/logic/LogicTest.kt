@@ -82,6 +82,40 @@ class LogicTest {
         assertEquals(Command.Navigate("palermo"), CommandParser.parse("avvia la navigazione per palermo"))
     }
 
+    @Test fun sveglia() {
+        assertEquals(Command.Alarm(7, 0), CommandParser.parse("metti la sveglia alle 7"))
+        assertEquals(Command.Alarm(7, 30), CommandParser.parse("sveglia alle sette e mezza"))
+        assertEquals(Command.Alarm(6, 45), CommandParser.parse("svegliami alle 6:45"))
+        assertEquals(Command.Alarm(6, 45), CommandParser.parse("svegliami alle sette meno un quarto"))
+        assertEquals(Command.Alarm(19, 15), CommandParser.parse("imposta una sveglia alle sette e un quarto di sera"))
+        assertEquals(Command.Alarm(1, 0), CommandParser.parse("metti una sveglia all'una"))
+        assertEquals(Command.Alarm(23, 0), CommandParser.parse("sveglia alle undici di notte"))
+        assertEquals(Command.Alarm(2, 0), CommandParser.parse("sveglia alle due di notte"))
+        assertEquals(Command.Alarm(12, 0), CommandParser.parse("sveglia a mezzogiorno"))
+        assertEquals(Command.Alarm(8, 45), CommandParser.parse("Metti la sveglia per domani alle 8 e quaranta cinque."))
+        assertEquals(Command.AlarmIn(1200), CommandParser.parse("svegliami tra 20 minuti"))
+        assertEquals(Command.AlarmWhen, CommandParser.parse("metti una sveglia"))
+        assertEquals(Command.Alarm(7, 30), CommandParser.parse("metti la sveglia alle 7.30"))
+    }
+
+    @Test fun timer() {
+        assertEquals(Command.Timer(300), CommandParser.parse("metti un timer di 5 minuti"))
+        assertEquals(Command.Timer(5400), CommandParser.parse("imposta un timer di un'ora e mezza"))
+        assertEquals(Command.Timer(1800), CommandParser.parse("timer di mezz'ora"))
+        assertEquals(Command.Timer(900), CommandParser.parse("timer di un quarto d'ora"))
+        assertEquals(Command.Timer(90), CommandParser.parse("timer un minuto e mezzo"))
+        assertEquals(Command.Timer(630), CommandParser.parse("conto alla rovescia di dieci minuti e trenta secondi"))
+        assertEquals(Command.Timer(4800), CommandParser.parse("timer 1 ora e 20"))
+        assertEquals(Command.Timer(25 * 60), CommandParser.parse("timer venti cinque minuti"))
+        assertEquals(Command.Timer(600), CommandParser.parse("timer 10"))
+        assertEquals(Command.Timer(600), CommandParser.parse("avvisami tra 10 minuti"))
+        assertEquals(Command.TimerHowLong, CommandParser.parse("metti un timer"))
+        assertEquals("1 ora e 30 minuti", TimeParser.describe(5400))
+        assertEquals("1 minuto e 30 secondi", TimeParser.describe(90))
+        // "metti" resta Spotify quando non si parla di sveglie o timer
+        assertEquals(Command.Play(PlayRequest("vasco rossi", MediaFocus.ANY)), CommandParser.parse("metti vasco rossi"))
+    }
+
     @Test fun navigazione() {
         assertEquals(Command.Navigate("catania"), CommandParser.parse("portami a catania"))
         assertEquals(Command.Navigate("via etnea 120 catania"), CommandParser.parse("naviga verso via etnea cento venti catania"))

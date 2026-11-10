@@ -12,6 +12,16 @@ sealed interface Command {
     data class Navigate(val destination: String) : Command
     /** "portami" senza dire dove */
     data object NavigateWhere : Command
+    /** sveglia a un orario */
+    data class Alarm(val hour: Int, val minute: Int) : Command
+    /** "svegliami tra 20 minuti" */
+    data class AlarmIn(val seconds: Int) : Command
+    /** "metti una sveglia" senza orario */
+    data object AlarmWhen : Command
+    data class Timer(val seconds: Int) : Command
+    /** "metti un timer" senza durata */
+    data object TimerHowLong : Command
+
     /** "metti … da Spotify" */
     data class Play(val request: PlayRequest) : Command
     /** "metti" senza dire cosa */
@@ -41,6 +51,16 @@ object CommandParser {
             "come (?:arrivo|si arriva|faccio ad arrivare|faccio a arrivare))" +
             "(?:\\s+(.*))?$"
     )
+
+    private val alarmRe = Regex(
+        "^$FILLERS(?:(?:metti(?:mi)?|imposta(?:mi)?|crea|aggiungi|punta|fissa|programma)(?: una| la| un'| l')? ?sveglia|" +
+            "sveglia|svegliami|(?:puoi|devi|mi puoi) svegliarmi)(?:\\s+(.*))?$"
+    )
+    private val timerRe = Regex(
+        "^$FILLERS(?:(?:metti(?:mi)?|imposta|avvia|fai partire|crea|aggiungi|fammi)(?: un| il)? " +
+            "(?:timer|conto alla rovescia)|timer|conto alla rovescia|avvisami|ricordami)(?:\\s+(.*))?$"
+    )
+    private val relative = Regex("^(?:tra|fra)\\s+")
 
     private val playRe = Regex(
         "^$FILLERS(?:(?:su |da |apri )?spotify\\s+)?(?:metti(?:mi)?|fammi (?:sentire|ascoltare)|riproduci|suona|" +
@@ -92,6 +112,18 @@ object CommandParser {
         navRe.find(text)?.let { m ->
             val dest = destination(m.groupValues[1])
             return if (dest.isEmpty()) Command.NavigateWhere else Command.Navigate(dest)
+        }
+        alarmRe.find(text)?.let { m ->
+            val rest = m.groupValues[1]
+            if (relative.containsMatchIn(rest)) {
+                TimeParser.duration(rest)?.let { return Command.AlarmIn(it) }
+            }
+            val c = TimeParser.clock(rest) ?: return Command.AlarmWhen
+            return Command.Alarm(c.hour, c.minute)
+        }
+        timerRe.find(text)?.let { m ->
+            val d = TimeParser.duration(m.groupValues[1]) ?: return Command.TimerHowLong
+            return Command.Timer(d)
         }
         playRe.find(text)?.let { m ->
             val req = playRequest(m.groupValues[1])
