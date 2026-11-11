@@ -38,6 +38,11 @@ class HeadsetActivity : Activity() {
 /** Microfono e voce dell'assistente sulle cuffie Bluetooth per la durata del dialogo. */
 class HeadsetAudio(private val c: Context) {
 
+    companion object {
+        /** esito dell'ultimo uso delle cuffie (diagnostica) */
+        @Volatile var lastReport: String? = null
+    }
+
     private val am = c.getSystemService(AudioManager::class.java)
     private val main = Handler(Looper.getMainLooper())
     private var proxy: BluetoothHeadset? = null
@@ -46,6 +51,18 @@ class HeadsetAudio(private val c: Context) {
     /** cambia a ogni collegamento/rilascio: scarta richiami arrivati tardi */
     private var seq = 0
 
+    /** il canale voce Bluetooth (SCO) risulta aperto, secondo il sistema audio */
+    @Volatile private var scoUp = false
+    private var receiverOn = false
+    private var previousMode = AudioManager.MODE_NORMAL
+    private var startedAt = 0L
+    private val scoReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(ctx: Context, i: android.content.Intent) {
+            val st = i.getIntExtra(AudioManager.EXTRA_SCO_AUDIO_STATE, AudioManager.SCO_AUDIO_STATE_ERROR)
+            scoUp = st == AudioManager.SCO_AUDIO_STATE_CONNECTED
+        }
+    }
+
     /** Vero mentre l'audio passa per le cuffie. */
     @Volatile var active = false
         private set
@@ -53,9 +70,23 @@ class HeadsetAudio(private val c: Context) {
     /** Collega microfono e audio delle cuffie; [then] parte quando sono pronti (al massimo dopo 2,5 s). */
     fun connect(then: () -> Unit) {
         val target = headsetDevice()
-        if (target == null) { then(); return } // nessuna cuffia Bluetooth con microfono: si usa il telefono
+        if (target == null) {
+            // nessuna cuffia Bluetooth con microfono: si usa il telefono
+            report("Nessuna cuffia con microfono trovata: usato il telefono")
+            then(); return
+        }
         val token = ++seq
         active = true
+        startedAt = SystemClock.elapsedRealtime()
+        scoUp = false
+        if (!receiverOn) {
+            try {
+                val f = android.content.IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
+                if (Build.VERSION.SDK_INT >= 33) c.registerReceiver(scoReceiver, f, Context.RECEIVER_EXPORTED)
+                else c.registerReceiver(scoReceiver, f)
+                receiverOn = true
+            } catch (e: Exception) { Log.w(TAG, "Stato canale voce", e) }
+        }
         withProxy { p ->
             if (token != seq) return@withProxy
             proxy = p
@@ -63,8 +94,7 @@ class HeadsetAudio(private val c: Context) {
             // dice alle cuffie che il riconoscimento è partito e apre il canale voce
             startVoiceRecognition(p, device)
             route(target)
-            val start = SystemClock.elapsedRealtime()
-            waitReady(token, target, start, then)
+            waitReady(token, target, startedAt, then)
         }
     }
 
@@ -79,11 +109,14 @@ class HeadsetAudio(private val c: Context) {
             try { if (hasBtPermission()) p.stopVoiceRecognition(d) } catch (e: Exception) { Log.w(TAG, "Fine riconoscimento cuffie", e) }
         }
         try {
+            @Suppress("DEPRECATION") run { am.isBluetoothScoOn = false; am.stopBluetoothSco() }
             if (Build.VERSION.SDK_INT >= 31) am.clearCommunicationDevice()
-            else {
-                @Suppress("DEPRECATION") run { am.isBluetoothScoOn = false; am.stopBluetoothSco() }
-            }
         } catch (e: Exception) { Log.w(TAG, "Audio cuffie", e) }
+        try {
+            if (am.mode == AudioManager.MODE_IN_COMMUNICATION)
+                am.mode = if (previousMode == AudioManager.MODE_IN_COMMUNICATION) AudioManager.MODE_NORMAL else previousMode
+        } catch (e: Exception) { Log.w(TAG, "Modalità audio", e) }
+        if (receiverOn) { try { c.unregisterReceiver(scoReceiver) } catch (_: Exception) { }; receiverOn = false }
         device = null
     }
 
@@ -107,14 +140,36 @@ class HeadsetAudio(private val c: Context) {
         }
     } catch (e: Exception) { null }
 
+    /**
+     * Porta voce e microfono sulle cuffie. Servono tutti e tre i passi: la modalità "comunicazione" (il bip e la
+     * voce seguono le cuffie), il dispositivo di comunicazione e il vecchio "SCO acceso", che è l'unico a spostare
+     * sulle cuffie anche la registrazione del riconoscitore vocale (altrimenti ascolta col microfono del telefono).
+     */
+    private var routeRefused = false
+
     private fun route(target: AudioDeviceInfo) {
+        routeRefused = false
         try {
-            if (Build.VERSION.SDK_INT >= 31) {
-                if (!am.setCommunicationDevice(target)) Log.w(TAG, "Cuffie: canale voce rifiutato")
-            } else {
-                @Suppress("DEPRECATION") run { am.startBluetoothSco(); am.isBluetoothScoOn = true }
+            previousMode = am.mode
+            am.mode = AudioManager.MODE_IN_COMMUNICATION
+        } catch (e: Exception) { Log.w(TAG, "Modalità audio", e) }
+        try {
+            if (Build.VERSION.SDK_INT >= 31 && !am.setCommunicationDevice(target)) {
+                routeRefused = true
+                Log.w(TAG, "Cuffie: canale voce rifiutato")
             }
         } catch (e: Exception) { Log.w(TAG, "Audio cuffie", e) }
+        if (target.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
+            try {
+                @Suppress("DEPRECATION") run { am.startBluetoothSco(); am.isBluetoothScoOn = true }
+            } catch (e: Exception) { Log.w(TAG, "SCO", e) }
+        }
+    }
+
+    /** Ultimo esito, mostrato in Attivazione → Cuffie Bluetooth. */
+    private fun report(text: String) {
+        lastReport = text
+        Log.i(TAG, "Cuffie: " + text)
     }
 
     /** Aspetta che il canale voce sia aperto, altrimenti le prime parole (e il bip) si perdono. */
@@ -125,14 +180,24 @@ class HeadsetAudio(private val c: Context) {
         val routed = Build.VERSION.SDK_INT < 31 || am.communicationDevice?.id == target.id
         val p = proxy
         val d = device
+        val headsetSays = if (p != null && d != null && hasBtPermission()) {
+            try { p.isAudioConnected(d) } catch (e: Exception) { false }
+        } else false
         val linkUp = when {
-            target.type != AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> elapsed >= 300
-            p != null && d != null && hasBtPermission() -> try { p.isAudioConnected(d) } catch (e: Exception) { elapsed >= 900 }
-            else -> elapsed >= 900 // senza il permesso Bluetooth non si può sapere: un attimo di margine
+            target.type != AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> elapsed >= 400 // LE Audio: nessun segnale da aspettare
+            else -> scoUp || headsetSays
         }
-        if ((routed && linkUp) || elapsed >= 2500) {
-            if (elapsed >= 2500) Log.w(TAG, "Cuffie: canale voce non confermato, si prosegue")
-            then()
+        if ((routed && linkUp) || elapsed >= 3000) {
+            val kind = if (target.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) "classiche" else "LE Audio"
+            val name = target.productName?.toString()?.takeIf { it.isNotBlank() } ?: "cuffie"
+            report(when {
+                linkUp && routed -> "$name ($kind): canale voce aperto in $elapsed ms"
+                !hasBtPermission() -> "$name: canale voce non confermato · manca il permesso «Dispositivi nelle vicinanze»"
+                routeRefused -> "$name ($kind): Android ha rifiutato il canale voce"
+                else -> "$name ($kind): canale voce non aperto dopo 3 s (comunicazione=${routed}, sco=${scoUp}, cuffie=${headsetSays})"
+            })
+            // appena aperto il canale, i primi istanti di audio spesso si perdono: un attimo di margine per il bip
+            main.postDelayed({ if (token == seq) then() }, if (linkUp) 350L else 0L)
             return
         }
         main.postDelayed({ waitReady(token, target, start, then) }, 100)

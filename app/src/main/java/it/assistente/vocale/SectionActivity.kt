@@ -283,8 +283,9 @@ class ActivationSection(a: SectionActivity) : Section(a) {
             else "Android la obbliga finché l'assistente ascolta. Tocca e disattiva «Ascolto in background» per nasconderla."
         )
         val btOk = Build.VERSION.SDK_INT < 31 || a.granted(Manifest.permission.BLUETOOTH_CONNECT)
-        budsRow.set(if (btOk) "✓ Pronto: parli in cuffia, risposte e bip in cuffia"
-        else "Serve il permesso «Dispositivi nelle vicinanze» per usare bene il microfono delle cuffie")
+        val last = HeadsetAudio.lastReport?.let { "\nUltimo uso: $it" } ?: ""
+        budsRow.set((if (btOk) "✓ Pronto: parli in cuffia, risposte e bip in cuffia"
+        else "Serve il permesso «Dispositivi nelle vicinanze» per usare bene il microfono delle cuffie") + last)
         budsButton.visibility = if (btOk) View.GONE else View.VISIBLE
     }
 }
