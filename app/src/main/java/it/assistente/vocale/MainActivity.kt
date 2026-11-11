@@ -165,6 +165,21 @@ class MainActivity : Activity() {
 
     // ---- stato e riassunti ----
 
+    /** "allo sblocco, in auto e in carica" */
+    private fun listenWhen(): String {
+        if (Prefs.listenAlways(this)) return "sempre"
+        val parts = buildList {
+            if (Prefs.listenScreen(this@MainActivity)) add("allo sblocco")
+            if (Prefs.listenCar(this@MainActivity)) add("in auto")
+            if (Prefs.listenCharging(this@MainActivity)) add("in carica")
+        }
+        return when (parts.size) {
+            0 -> "mai (solo tasto)"
+            1 -> parts[0]
+            else -> parts.dropLast(1).joinToString(", ") + " e " + parts.last()
+        }
+    }
+
     private fun refresh() {
         val activation = Prefs.activation(this)
         val voice = activation != Prefs.Activation.GESTURE
@@ -174,17 +189,20 @@ class MainActivity : Activity() {
         // stato
         val (colorId, title, detail) = when {
             !voice -> Triple(R.color.working, "Pronto", "Si attiva con il tasto o il gesto dell'assistente")
-            listening && serviceStatus.startsWith("In pausa") -> Triple(R.color.asking, "In pausa", serviceStatus.substringAfter(": "))
+            listening && serviceStatus.startsWith("Sospeso") -> Triple(R.color.asking, "Sospeso", serviceStatus.substringAfter(": "))
             listening && serviceStatus.startsWith("Errore") -> Triple(R.color.error, "Errore", serviceStatus.substringAfter(": "))
-            listening -> Triple(R.color.working, "Attivo",
-                "In attesa di «${Prefs.wakePhrase(this)}»" + if (activation == Prefs.Activation.BOTH) " · anche tasto e gesto" else "")
+            listening && serviceStatus.startsWith("Microfono spento") -> Triple(R.color.listening, "Pronto",
+                "Microfono spento: si accende " + listenWhen() +
+                    if (activation == Prefs.Activation.BOTH) " · ora tieni premuto il tasto di accensione" else "")
+            listening -> Triple(R.color.working, "In ascolto",
+                "Di' «${Prefs.wakePhrase(this)}» · ${serviceStatus.substringAfter("· ", "")}")
             else -> Triple(R.color.text_dim, "Spento", "L'ascolto a voce è fermo")
         }
         dot.background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(getColor(colorId)) }
         statusTitle.text = title
         statusDetail.text = detail
         val h = AssistantBus.wakeHeard
-        heard.visibility = if (listening) View.VISIBLE else View.GONE
+        heard.visibility = if (listening && serviceStatus.startsWith("In ascolto")) View.VISIBLE else View.GONE
         heard.text = if (h.isEmpty()) "Sento: — prova a dire la frase" else "Sento: «$h»"
         toggle.visibility = if (voice) View.VISIBLE else View.GONE
         toggle.text = if (listening) "Ferma ascolto" else "Avvia ascolto"
@@ -236,10 +254,7 @@ class MainActivity : Activity() {
         rows[SectionKey.CAR]?.set(
             Prefs.carMode(this).label.substringBefore(" (") + if (CarMode.androidAutoConnected(this)) " · collegato" else ""
         )
-        rows[SectionKey.ENERGY]?.set(
-            Prefs.vad(this).label.substringBefore(" (").substringBefore(":") +
-                if (Prefs.batteryPause(this)) " · pausa sotto ${Prefs.batteryThreshold(this)}%" else ""
-        )
+        rows[SectionKey.ENERGY]?.set("Ascolta " + listenWhen())
         rows[SectionKey.PERMISSIONS]?.set(if (missing == 0) "Tutti concessi ✓" else "Mancano $missing")
         rows[SectionKey.COMMANDS]?.set("Cosa puoi dire")
     }

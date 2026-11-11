@@ -153,6 +153,8 @@ class SectionActivity : Activity() {
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<String>, grantResults: IntArray) {
+        // es. permesso Bluetooth appena concesso: il servizio rilegge le auto collegate
+        WakeService.reload(this)
         section.resume()
         section.refresh()
     }
@@ -638,37 +640,85 @@ class CarSection(a: SectionActivity) : Section(a) {
 }
 
 class EnergySection(a: SectionActivity) : Section(a) {
+    private lateinit var status: Row
+    private lateinit var warning: TextView
     private lateinit var vadInfo: Row
+    private lateinit var windowSpinner: Spinner
+    private lateinit var carSpinner: Spinner
     private lateinit var threshold: Spinner
+    private val windows = listOf(15 to "per 15 secondi", 30 to "per 30 secondi", 60 to "per 1 minuto", -1 to "finché resta acceso")
+    private val carDurations = listOf(-1 to "per tutto il viaggio", 10 to "per i primi 10 minuti", 20 to "per i primi 20 minuti", 30 to "per i primi 30 minuti")
     private val thresholds = listOf(10, 15, 20, 25, 30)
 
-    override fun build(f: Form) {
-        f.header("Rilevatore di voce")
-        val card = f.card()
-        val modes = Prefs.Vad.values().toList()
-        f.spinnerRow(card, "Sensibilità", modes.map { it.label }, modes.indexOf(Prefs.vad(a))) { i ->
-            Prefs.setVad(a, modes[i]); WakeService.reload(a); refresh()
-        }
-        vadInfo = f.row(card, "Come funziona", null)
+    private fun changed() { WakeService.reload(a); refresh() }
 
-        f.header("Batteria scarica")
-        val b = f.card()
-        val (_, sw) = f.switchRow(b, "Pausa con batteria scarica", "Riprende da solo quando metti in carica", Prefs.batteryPause(a)) { on ->
-            Prefs.setBatteryPause(a, on, Prefs.batteryThreshold(a)); WakeService.reload(a); refresh()
+    override fun build(f: Form) {
+        status = f.row(f.card(), "Adesso", null)
+        warning = f.note("")
+
+        f.header("Quando ascoltare «${Prefs.wakePhrase(a)}»")
+        val when_ = f.card()
+        f.switchRow(when_, "Allo sblocco dello schermo", "Ogni volta che accendi o sblocchi il telefono", Prefs.listenScreen(a)) {
+            Prefs.setListen(a, "listen_screen", it); changed()
         }
-        threshold = f.spinnerRow(b, "Soglia", thresholds.map { "Sotto il $it%" },
-            thresholds.indexOf(Prefs.batteryThreshold(a)).coerceAtLeast(2)) { i ->
-            Prefs.setBatteryPause(a, sw.isChecked, thresholds[i]); WakeService.reload(a)
+        windowSpinner = f.spinnerRow(when_, "Per quanto", windows.map { it.second },
+            windows.indexOfFirst { it.first == Prefs.screenWindow(a) }.coerceAtLeast(1)) { i ->
+            Prefs.setScreenWindow(a, windows[i].first); changed()
         }.second
-        f.note("In pausa il microfono si chiude (sparisce anche il pallino verde); il tasto o gesto continua a funzionare.")
+        f.switchRow(when_, "In auto", "Con Android Auto o il Bluetooth dell'auto collegato", Prefs.listenCar(a)) { on ->
+            Prefs.setListen(a, "listen_car", on)
+            // per riconoscere l'autoradio Bluetooth serve il permesso «dispositivi nelle vicinanze»
+            if (on && Build.VERSION.SDK_INT >= 31 && !a.granted(Manifest.permission.BLUETOOTH_CONNECT)) {
+                a.requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 2)
+            }
+            changed()
+        }
+        carSpinner = f.spinnerRow(when_, "Per quanto", carDurations.map { it.second },
+            carDurations.indexOfFirst { it.first == Prefs.carMinutes(a) }.coerceAtLeast(0)) { i ->
+            Prefs.setCarMinutes(a, carDurations[i].first); changed()
+        }.second
+        f.switchRow(when_, "In carica", "Non in auto: in auto valgono le regole dell'auto", Prefs.listenCharging(a)) {
+            Prefs.setListen(a, "listen_charging", it); changed()
+        }
+        f.switchRow(when_, "Sempre", "Microfono sempre aperto: consumo alto", Prefs.listenAlways(a)) {
+            Prefs.setListen(a, "listen_always", it); changed()
+        }
+        f.note("Negli altri momenti il microfono è spento e non consuma: tieni premuto il tasto di accensione.")
+
+        f.header("Protezioni")
+        val guards = f.card()
+        f.switchRow(guards, "Sospendi se il telefono è caldo", "Riprende quando si raffredda (utile in auto e in carica)", Prefs.heatGuard(a)) {
+            Prefs.setListen(a, "heat_guard", it); changed()
+        }
+        val (_, sw) = f.switchRow(guards, "Sospendi con batteria scarica", "Riprende quando metti in carica", Prefs.batteryPause(a)) { on ->
+            Prefs.setBatteryPause(a, on, Prefs.batteryThreshold(a)); changed()
+        }
+        threshold = f.spinnerRow(guards, "Soglia", thresholds.map { "Sotto il $it%" },
+            thresholds.indexOf(Prefs.batteryThreshold(a)).coerceAtLeast(2)) { i ->
+            Prefs.setBatteryPause(a, sw.isChecked, thresholds[i]); changed()
+        }.second
+
+        f.header("Filtro voce (in auto e in carica)")
+        val vadCard = f.card()
+        val modes = Prefs.Vad.values().toList()
+        f.spinnerRow(vadCard, "Sensibilità", modes.map { it.label }, modes.indexOf(Prefs.vad(a))) { i ->
+            Prefs.setVad(a, modes[i]); changed()
+        }
+        vadInfo = f.row(vadCard, "Come funziona", null)
     }
 
     override fun refresh() {
-        vadInfo.set(if (Prefs.vad(a) == Prefs.Vad.OFF)
-            "Il riconoscitore analizza tutto l'audio, anche il silenzio: consuma di più."
-        else "Il microfono resta aperto, ma il riconoscitore si accende solo quando qualcuno parla. " +
-            "Se a volte non ti sente, alza la sensibilità; con TV o musica il risparmio è minore.")
+        status.set(AssistantBus.serviceStatus.ifEmpty { "—" })
+        val mode = Prefs.activation(a)
+        warning.visibility = if (mode == Prefs.Activation.VOICE) View.VISIBLE else View.GONE
+        warning.text = "⚠️ Con l'attivazione «A voce», quando il microfono è spento non c'è modo di chiamarlo: " +
+            "in Attivazione scegli «Entrambi» per avere anche il tasto di accensione."
+        windowSpinner.isEnabled = Prefs.listenScreen(a)
+        carSpinner.isEnabled = Prefs.listenCar(a)
         threshold.isEnabled = Prefs.batteryPause(a)
+        vadInfo.set(if (Prefs.vad(a) == Prefs.Vad.OFF) "Il riconoscitore analizza tutto l'audio: consuma di più."
+        else "Durante i viaggi e in carica il riconoscitore si accende solo quando qualcuno parla. " +
+            "Allo sblocco dello schermo invece ascolta sempre a sensibilità piena.")
     }
 }
 
@@ -687,6 +737,10 @@ class PermissionsSection(a: SectionActivity) : Section(a) {
             Item("Rubrica", "Per trovare i contatti da chiamare", { a.granted(Manifest.permission.READ_CONTACTS) }, ask),
             Item("Chiamate", "Per avviare le chiamate", { a.granted(Manifest.permission.CALL_PHONE) }, ask),
             Item("Calendario", "Per aggiungere eventi", { CalendarStore.hasPermission(a) }, ask),
+            Item("Dispositivi nelle vicinanze", "Per riconoscere l'autoradio Bluetooth",
+                { Build.VERSION.SDK_INT < 31 || a.granted(Manifest.permission.BLUETOOTH_CONNECT) }) {
+                if (Build.VERSION.SDK_INT >= 31) a.requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 2)
+            },
             Item("Notifiche", "Avvisi dopo riavvio o aggiornamento",
                 { Build.VERSION.SDK_INT < 33 || a.granted(Manifest.permission.POST_NOTIFICATIONS) }, ask),
             Item("Mostra sopra altre app", "Per il popup e a schermo bloccato", { Settings.canDrawOverlays(a) }) {

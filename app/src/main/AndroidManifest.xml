@@ -24,6 +24,9 @@
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
     <!-- eventi in calendario -->
     <uses-permission android:name="android.permission.READ_CALENDAR" />
+    <!-- riconoscere l'autoradio Bluetooth (ascolto in auto) -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <!-- solo per gli aggiornamenti: il riconoscimento resta sul telefono -->
     <uses-permission android:name="android.permission.INTERNET" />

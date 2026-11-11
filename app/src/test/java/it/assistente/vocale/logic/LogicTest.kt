@@ -239,6 +239,54 @@ class LogicTest {
         assertTrue(run(high, audio(600, noise = 200, voice = 1000, seed = 10)))
     }
 
+    @Test fun fraseUnica() {
+        assertEquals("chiama Mario", WakeMatcher.stripLeading("ok alfio", "Ok Alfio chiama Mario"))
+        assertEquals("chiama Mario", WakeMatcher.stripLeading("ok alfio", "alfio, chiama Mario"))
+        assertEquals("portami a casa", WakeMatcher.stripLeading("ok alfio", "o calfio portami a casa"))
+        assertEquals("chiama Mario", WakeMatcher.stripLeading("ok alfio", "chiama Mario"))
+        assertEquals("Alfredo chiama", WakeMatcher.stripLeading("ok alfio", "Alfredo chiama"))
+        assertEquals("", WakeMatcher.stripLeading("ok alfio", "ok alfio"))
+        assertEquals("metti Vasco", WakeMatcher.stripLeading("ciao assistente", "assistente metti Vasco"))
+    }
+
+    @Test fun quandoAscoltare() {
+        val s = ListenPolicy.Settings()
+        fun st(now: Long = 100_000, screenOn: Boolean = false, screenSince: Long = 0, inCar: Boolean = false,
+               carSince: Long = 0, charging: Boolean = false, hot: Boolean = false, battery: Int = 80) =
+            ListenPolicy.State(now, screenOn, screenSince, inCar, carSince, charging, hot, battery)
+        fun d(set: ListenPolicy.Settings, state: ListenPolicy.State) = ListenPolicy.decide(set, state)
+        val silent = ListenPolicy.Decision.Silent(ListenPolicy.Off.NONE)
+
+        // tasca: schermo spento, non in carica, non in auto -> microfono spento
+        assertEquals(silent, d(s, st()))
+        // schermo acceso da 10 s: ascolta fino a 30 s dall'accensione
+        assertEquals(ListenPolicy.Decision.Listen(ListenPolicy.Reason.SCREEN, 120_000), d(s, st(now = 100_000, screenOn = true, screenSince = 90_000)))
+        // finestra scaduta: spento anche se lo schermo è acceso
+        assertEquals(silent, d(s, st(now = 200_000, screenOn = true, screenSince = 90_000)))
+        // "finché acceso"
+        assertEquals(ListenPolicy.Decision.Listen(ListenPolicy.Reason.SCREEN, null),
+            d(s.copy(screenWindowSec = -1), st(now = 999_000, screenOn = true, screenSince = 0)))
+        // in auto per tutto il viaggio
+        assertEquals(ListenPolicy.Decision.Listen(ListenPolicy.Reason.CAR, null), d(s, st(inCar = true, carSince = 0)))
+        // in auto solo i primi 10 minuti
+        val tenMin = s.copy(carMinutes = 10)
+        assertEquals(ListenPolicy.Decision.Listen(ListenPolicy.Reason.CAR, 600_000), d(tenMin, st(now = 60_000, inCar = true, carSince = 0)))
+        assertEquals(silent, d(tenMin, st(now = 700_000, inCar = true, carSince = 0)))
+        // in carica a casa: ascolta; in carica in auto: valgono le regole dell'auto
+        assertEquals(ListenPolicy.Decision.Listen(ListenPolicy.Reason.CHARGING, null), d(s, st(charging = true)))
+        assertEquals(silent, d(tenMin, st(now = 700_000, inCar = true, carSince = 0, charging = true)))
+        // protezioni: caldo e batteria scarica vincono su tutto
+        assertEquals(ListenPolicy.Decision.Silent(ListenPolicy.Off.HEAT), d(s, st(inCar = true, hot = true)))
+        assertEquals(ListenPolicy.Decision.Silent(ListenPolicy.Off.BATTERY), d(s, st(screenOn = true, screenSince = 99_000, battery = 15)))
+        // batteria scarica ma in carica: niente pausa
+        assertEquals(ListenPolicy.Decision.Listen(ListenPolicy.Reason.CHARGING, null), d(s, st(charging = true, battery = 15)))
+        // con più condizioni vince quella che dura di più
+        assertEquals(ListenPolicy.Decision.Listen(ListenPolicy.Reason.CAR, null),
+            d(s, st(now = 100_000, screenOn = true, screenSince = 99_000, inCar = true)))
+        // sempre
+        assertEquals(ListenPolicy.Decision.Listen(ListenPolicy.Reason.ALWAYS, null), d(s.copy(always = true), st()))
+    }
+
     @Test fun navigazione() {
         assertEquals(Command.Navigate("catania"), CommandParser.parse("portami a catania"))
         assertEquals(Command.Navigate("via etnea 120 catania"), CommandParser.parse("naviga verso via etnea cento venti catania"))

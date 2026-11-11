@@ -72,6 +72,23 @@ object Prefs {
     fun blur(c: Context) = sp(c).getBoolean("blur", true)
     fun setBlur(c: Context, v: Boolean) = sp(c).edit().putBoolean("blur", v).apply()
 
+    // quando ascoltare «Ok Alfio» (fuori da queste situazioni il microfono è spento)
+    fun listenScreen(c: Context) = sp(c).getBoolean("listen_screen", true)
+    /** secondi dopo accensione/sblocco; -1 = finché lo schermo resta acceso */
+    fun screenWindow(c: Context) = sp(c).getInt("screen_window", 30)
+    fun listenCar(c: Context) = sp(c).getBoolean("listen_car", true)
+    /** minuti dal collegamento all'auto; -1 = tutto il viaggio */
+    fun carMinutes(c: Context) = sp(c).getInt("car_minutes", -1)
+    fun listenCharging(c: Context) = sp(c).getBoolean("listen_charging", true)
+    fun listenAlways(c: Context) = sp(c).getBoolean("listen_always", false)
+    fun heatGuard(c: Context) = sp(c).getBoolean("heat_guard", true)
+    fun setListen(c: Context, key: String, v: Boolean) = sp(c).edit().putBoolean(key, v).apply()
+    fun setScreenWindow(c: Context, v: Int) = sp(c).edit().putInt("screen_window", v).apply()
+    fun setCarMinutes(c: Context, v: Int) = sp(c).edit().putInt("car_minutes", v).apply()
+    /** il riconoscitore di sistema non accetta il nostro audio (frase unica): metodo classico */
+    fun streamUnsupported(c: Context) = sp(c).getBoolean("stream_unsupported", false)
+    fun setStreamUnsupported(c: Context, v: Boolean) = sp(c).edit().putBoolean("stream_unsupported", v).apply()
+
     // risparmio energetico
     enum class Vad(val label: String, val sensitivity: it.assistente.vocale.logic.VoiceDetector.Sensitivity?) {
         OFF("Disattivato: riconoscitore sempre acceso", null),

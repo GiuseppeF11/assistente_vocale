@@ -123,18 +123,28 @@ App registrata su developer.spotify.com con Redirect URI `assistente-vocale://ca
 Niente accesso alle notifiche: con quel permesso Play Protect blocca l'installazione degli APK scaricati
 dal browser. Lo stesso vale per lettura SMS e servizi di accessibilità: l'app non deve mai chiederli.
 
-## Risparmio energetico
+## Quando ascolta «Ok Alfio» (risparmio energetico)
 
-Quasi tutto il consumo dell'ascolto a voce viene dal riconoscitore (una piccola rete neurale), non dal microfono.
+Il microfono sempre aperto costa caro soprattutto a schermo spento (impedisce al telefono di dormire).
+Per questo «Ok Alfio» si ascolta solo nelle situazioni scelte; negli altri momenti il microfono è spento
+(consumo zero) e si chiama l'assistente tenendo premuto il tasto di accensione (attivazione «Entrambi»).
 
-- **Rilevatore di voce**: un filtro leggerissimo stima il rumore di fondo e accende il riconoscitore solo quando
-  qualcuno parla; all'accensione gli passa l'ultimo secondo già sentito, così l'inizio della frase non si perde.
-  Nel silenzio il microfono si legge a blocchi da 400 ms. Un rumore costante (TV, motore) diventa "fondo" in
-  qualche decina di secondi. Sensibilità alta / media (predefinita) / bassa, oppure disattivato.
-- **Pausa con batteria scarica**: sotto la soglia (predefinita 20%) e non in carica il microfono si chiude;
-  riprende in carica. Il tasto/gesto resta disponibile.
+- **Allo sblocco dello schermo**: per 15 s / 30 s / 1 min / finché acceso, a ogni accensione o sblocco;
+  in questa finestra niente filtro voce, sensibilità piena.
+- **In auto** (Android Auto o autoradio Bluetooth): per tutto il viaggio o solo i primi 10/20/30 minuti.
+- **In carica**, ma non in auto (in auto valgono le regole dell'auto).
+- **Sempre** (consumo alto, spento di base).
+- **Protezioni**: sospensione se il telefono è caldo (stato termico di Android o batteria oltre 41 °C) e con
+  batteria sotto soglia se non in carica.
 
-Il microfono resta comunque aperto (pallino verde): per sentire la frase bisogna ascoltare.
+Il modello vocale resta in memoria: all'accensione dello schermo l'ascolto è pronto subito. Il processore
+viene tenuto sveglio solo mentre il microfono è aperto.
+
+**Frase unica (Android 13+)**: dopo «Ok Alfio» il nostro microfono resta aperto e l'audio va direttamente al
+riconoscitore del telefono, compreso quanto detto subito dopo la frase: «Ok Alfio chiama Mario» tutto d'un fiato
+funziona, senza attese. La frase di attivazione viene tolta dal testo. Se il riconoscitore non accetta l'audio
+esterno, l'app torna da sola al metodo classico. Il riconoscitore viene inoltre preparato in anticipo mentre
+si aspetta la frase.
 
 ## Calendario
 

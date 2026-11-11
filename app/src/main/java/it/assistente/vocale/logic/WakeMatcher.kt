@@ -26,4 +26,23 @@ object WakeMatcher {
         }
         return false
     }
+
+    /**
+     * Toglie la frase di attivazione dall'inizio del comando: con la frase unica il riconoscitore riceve
+     * anche la coda di «Ok Alfio» ("alfio chiama Mario" -> "chiama Mario"). Mantiene maiuscole e accenti.
+     */
+    fun stripLeading(phrase: String, heard: String): String {
+        val p = Text.tokens(phrase)
+        if (p.isEmpty()) return heard.trim()
+        val words = heard.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        // la frase intera o solo la sua parte finale ("alfio")
+        val targets = p.indices.map { p.subList(it, p.size).joinToString("") }.filter { it.length >= 4 }
+        for (k in minOf(p.size + 1, words.size) downTo 1) {
+            val joined = words.subList(0, k).joinToString("") { Text.normalize(it).replace(" ", "") }
+            if (joined.length >= 4 && targets.any { t -> Text.soundsLike(t, joined) >= 0.8 }) {
+                return words.drop(k).joinToString(" ").trimStart(',', '.', ';', ':', '!', '?', ' ')
+            }
+        }
+        return heard.trim()
+    }
 }

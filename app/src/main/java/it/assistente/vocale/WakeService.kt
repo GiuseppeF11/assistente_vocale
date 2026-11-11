@@ -47,6 +47,7 @@ import it.assistente.vocale.logic.SpotifyItem
 import it.assistente.vocale.logic.Text
 import it.assistente.vocale.logic.TimeParser
 import it.assistente.vocale.logic.MediaFocus
+import it.assistente.vocale.logic.ListenPolicy
 import it.assistente.vocale.logic.VoiceDetector
 import it.assistente.vocale.logic.WakeMatcher
 import org.json.JSONArray
@@ -107,9 +108,11 @@ class WakeService : Service(), AssistantBus.Controller {
 
     /**
      * EXTERNAL: il microfono è stato ceduto al riconoscitore di sistema.
-     * IDLE: microfono chiuso (modalità tasto/gesto, tra un comando e l'altro).
+     * IDLE: microfono chiuso (nessuna condizione di ascolto attiva, oppure tasto/gesto).
+     * HOLD: frase di attivazione appena sentita: si continua a registrare in attesa del riconoscitore.
+     * STREAM: il nostro audio va direttamente al riconoscitore di sistema (frase unica, Android 13+).
      */
-    private enum class Mode { WAKE, COMMAND, PAUSED, EXTERNAL, IDLE }
+    private enum class Mode { WAKE, COMMAND, PAUSED, EXTERNAL, IDLE, HOLD, STREAM }
 
     /** In ordine di preferenza; si scende quando un livello non funziona su questo telefono. */
     private enum class Asr(val label: String) {
@@ -141,7 +144,12 @@ class WakeService : Service(), AssistantBus.Controller {
     // --- condivisi con il thread audio ---
     @Volatile private var alive = false
     @Volatile private var failed = false
-    @Volatile private var mode = Mode.WAKE
+    @Volatile private var modeField = Mode.WAKE
+    private val modeLock = Object()
+    /** cambiare modo sveglia il thread audio se stava aspettando a microfono chiuso */
+    private var mode: Mode
+        get() = modeField
+        set(v) { modeField = v; synchronized(modeLock) { modeLock.notifyAll() } }
     @Volatile private var micReleased = false
     @Volatile private var resetRequested = false
     @Volatile private var muteUntil = 0L
@@ -159,12 +167,42 @@ class WakeService : Service(), AssistantBus.Controller {
     private var detector: VoiceDetector? = null
     private var voiceActive = false
     @Volatile private var detectorDirty = true
-    /** pausa per batteria scarica: microfono chiuso, resta il tasto/gesto */
-    @Volatile private var batteryPaused = false
+    /** nelle finestre a schermo acceso niente filtro: sensibilità piena */
+    @Volatile private var fullSensitivity = false
+
+    // --- contesto (thread principale): decide quando il microfono ascolta ---
+    @Volatile private var listenAllowed = false
+    private var decision: ListenPolicy.Decision = ListenPolicy.Decision.Silent(ListenPolicy.Off.NONE)
+    private var screenOn = true
+    private var screenSince = 0L
+    private var charging = false
     private var batteryLevel = -1
-    private val batteryReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(c: Context, i: Intent) = onBattery(i)
+    private var batteryHot = false
+    private var thermalHot = false
+    private var autoConnected = false
+    private val btCars = HashSet<String>()
+    private var carSince = 0L
+    private var wasInCar = false
+    private var lastStatus = ""
+    private val policyTimer = Runnable { updatePolicy() }
+    private val contextReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: Context, i: Intent) = onContext(i)
     }
+    private val thermalListener = PowerManager.OnThermalStatusChangedListener { status ->
+        thermalHot = status >= PowerManager.THERMAL_STATUS_MODERATE
+        updatePolicy()
+    }
+
+    // --- frase unica e riconoscitore pronto ---
+    /** audio da passare al riconoscitore: coda della frase di attivazione + quanto detto subito dopo */
+    private val held = java.util.concurrent.ConcurrentLinkedQueue<ShortArray>()
+    @Volatile private var streamOut: java.io.OutputStream? = null
+    /** questo dialogo è partito dalla voce: si può usare la frase unica */
+    private var fromVoice = false
+    /** la sessione di riconoscimento in corso riceve il nostro audio (va tolto «Ok Alfio» dal testo) */
+    private var streaming = false
+    private var streamStartedAt = 0L
+    private var warm: Pair<Asr, SpeechRecognizer>? = null
 
     // --- solo thread principale ---
     private var wakeLock: PowerManager.WakeLock? = null
@@ -249,39 +287,169 @@ class WakeService : Service(), AssistantBus.Controller {
         asrLevel = Asr.ON_DEVICE
         biasingOk = true
         detectorDirty = true
-        registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.let { onBattery(it) }
         tts?.shutdown()
         ttsReady = false
         initTts()
-        Notifications.refreshService(this, if (batteryPaused) "In pausa: batteria scarica" else null)
         val inDialog = AssistantBus.state.phase != Phase.HIDDEN
-        if (!inDialog) {
-            if (!Prefs.voiceWake(this)) { stopSelf(); return }
-            voskNeeded = true
-            mode = idleMode()
+        if (!inDialog && !Prefs.voiceWake(this)) { stopSelf(); return }
+        voskNeeded = true
+        lastStatus = ""
+        loadConnectedCars()
+        updatePolicy()
+    }
+
+    private fun idleMode() = if (Prefs.voiceWake(this) && listenAllowed) Mode.WAKE else Mode.IDLE
+
+    // =============================================================================================
+    // Quando ascoltare: schermo, auto, carica, protezioni
+    // =============================================================================================
+
+    private fun registerContext() {
+        val filter = android.content.IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_USER_PRESENT)
+            addAction(Intent.ACTION_BATTERY_CHANGED)
+            addAction(android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED)
+            addAction(android.bluetooth.BluetoothDevice.ACTION_ACL_DISCONNECTED)
+            addAction(android.app.UiModeManager.ACTION_ENTER_CAR_MODE)
+            addAction(android.app.UiModeManager.ACTION_EXIT_CAR_MODE)
+            // inviato dall'app Android Auto quando il telefono si collega/scollega dall'auto
+            addAction("androidx.car.app.connection.action.CAR_CONNECTION_UPDATED")
         }
-        AssistantBus.status(statusText())
+        val sticky = if (Build.VERSION.SDK_INT >= 33) registerReceiver(contextReceiver, filter, Context.RECEIVER_EXPORTED)
+        else registerReceiver(contextReceiver, filter)
+        sticky?.let { onContext(it) }
+        registerReceiver(null, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.let { readBattery(it) }
+        try {
+            val pm = getSystemService(PowerManager::class.java)
+            thermalHot = pm.currentThermalStatus >= PowerManager.THERMAL_STATUS_MODERATE
+            pm.addThermalStatusListener(mainExecutor, thermalListener)
+        } catch (e: Exception) { Log.w(TAG, "Stato termico", e) }
+        screenOn = getSystemService(PowerManager::class.java).isInteractive
+        screenSince = SystemClock.elapsedRealtime()
+        autoConnected = CarMode.androidAutoConnected(this)
+        loadConnectedCars()
     }
 
-    private fun idleMode() = if (Prefs.voiceWake(this) && !batteryPaused) Mode.WAKE else Mode.IDLE
-
-    private fun statusText() = when {
-        !Prefs.voiceWake(this) -> "Pronto (tasto o gesto)"
-        batteryPaused -> "In pausa: batteria al $batteryLevel% (riprende in carica)"
-        else -> "In ascolto: di' «$wakePhrase»"
+    private fun unregisterContext() {
+        try { unregisterReceiver(contextReceiver) } catch (_: Exception) { }
+        try { getSystemService(PowerManager::class.java).removeThermalStatusListener(thermalListener) } catch (_: Exception) { }
     }
 
-    /** Batteria sotto la soglia e non in carica: si chiude il microfono finché non la ricarichi. */
-    private fun onBattery(i: Intent) {
+    private fun readBattery(i: Intent) {
         val scale = i.getIntExtra(android.os.BatteryManager.EXTRA_SCALE, 100).coerceAtLeast(1)
         batteryLevel = i.getIntExtra(android.os.BatteryManager.EXTRA_LEVEL, -1) * 100 / scale
-        val charging = i.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) != 0
-        val pause = Prefs.batteryPause(this) && !charging && batteryLevel in 0..Prefs.batteryThreshold(this)
-        if (pause == batteryPaused) return
-        batteryPaused = pause
+        charging = i.getIntExtra(android.os.BatteryManager.EXTRA_PLUGGED, 0) != 0
+        // temperatura in decimi di grado; isteresi per non accendere e spegnere di continuo
+        val temp = i.getIntExtra(android.os.BatteryManager.EXTRA_TEMPERATURE, 0) / 10.0
+        batteryHot = if (batteryHot) temp > 39.0 else temp >= 41.0
+    }
+
+    private fun onContext(i: Intent) {
+        val now = SystemClock.elapsedRealtime()
+        when (i.action) {
+            Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> {
+                // ogni accensione o sblocco riapre la finestra di ascolto
+                screenOn = true; screenSince = now
+                autoConnected = CarMode.androidAutoConnected(this)
+            }
+            Intent.ACTION_SCREEN_OFF -> screenOn = false
+            Intent.ACTION_BATTERY_CHANGED -> readBattery(i)
+            android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED, android.bluetooth.BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
+                @Suppress("DEPRECATION")
+                val device = i.getParcelableExtra<android.bluetooth.BluetoothDevice>(android.bluetooth.BluetoothDevice.EXTRA_DEVICE)
+                if (device != null && isCar(device)) {
+                    if (i.action == android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED) btCars += device.address
+                    else btCars -= device.address
+                }
+            }
+            else -> autoConnected = CarMode.androidAutoConnected(this) ||
+                i.action == android.app.UiModeManager.ACTION_ENTER_CAR_MODE
+        }
+        updatePolicy()
+    }
+
+    /** Autoradio o vivavoce dell'auto (non cuffie): classe Bluetooth del dispositivo. */
+    @SuppressLint("MissingPermission")
+    private fun isCar(d: android.bluetooth.BluetoothDevice): Boolean {
+        if (Build.VERSION.SDK_INT >= 31 && !granted(Manifest.permission.BLUETOOTH_CONNECT)) return false
+        val cls = try { d.bluetoothClass?.deviceClass } catch (e: SecurityException) { null } ?: return false
+        return cls == android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_CAR_AUDIO ||
+            cls == android.bluetooth.BluetoothClass.Device.AUDIO_VIDEO_HANDSFREE
+    }
+
+    /** All'avvio: l'auto è già collegata via Bluetooth? */
+    @SuppressLint("MissingPermission")
+    private fun loadConnectedCars() {
+        if (Build.VERSION.SDK_INT >= 31 && !granted(Manifest.permission.BLUETOOTH_CONNECT)) return
+        val adapter = getSystemService(android.bluetooth.BluetoothManager::class.java)?.adapter ?: return
+        for (profile in listOf(android.bluetooth.BluetoothProfile.HEADSET, android.bluetooth.BluetoothProfile.A2DP)) {
+            try {
+                adapter.getProfileProxy(this, object : android.bluetooth.BluetoothProfile.ServiceListener {
+                    override fun onServiceConnected(p: Int, proxy: android.bluetooth.BluetoothProfile) {
+                        try { proxy.connectedDevices.filter { isCar(it) }.forEach { btCars += it.address } } catch (_: Exception) { }
+                        adapter.closeProfileProxy(p, proxy)
+                        main.post { updatePolicy() }
+                    }
+                    override fun onServiceDisconnected(p: Int) {}
+                }, profile)
+            } catch (e: Exception) { Log.w(TAG, "Bluetooth", e) }
+        }
+    }
+
+    private fun policySettings() = ListenPolicy.Settings(
+        screen = Prefs.listenScreen(this),
+        screenWindowSec = Prefs.screenWindow(this),
+        car = Prefs.listenCar(this),
+        carMinutes = Prefs.carMinutes(this),
+        charging = Prefs.listenCharging(this),
+        always = Prefs.listenAlways(this),
+        heatGuard = Prefs.heatGuard(this),
+        batteryGuard = Prefs.batteryPause(this),
+        batteryThreshold = Prefs.batteryThreshold(this),
+    )
+
+    /** Ricalcola se ascoltare; apre o chiude il microfono e aggiorna stato e notifica. */
+    private fun updatePolicy() {
+        if (!alive) return
+        main.removeCallbacks(policyTimer)
+        val now = SystemClock.elapsedRealtime()
+        val inCar = autoConnected || btCars.isNotEmpty()
+        if (inCar && !wasInCar) carSince = now
+        wasInCar = inCar
+        val d = ListenPolicy.decide(
+            policySettings(),
+            ListenPolicy.State(now, screenOn, screenSince, inCar, carSince, charging, thermalHot || batteryHot, batteryLevel),
+        )
+        decision = d
+        val allowed = d is ListenPolicy.Decision.Listen && Prefs.voiceWake(this)
+        val full = d is ListenPolicy.Decision.Listen && d.reason == ListenPolicy.Reason.SCREEN
+        if (full != fullSensitivity) { fullSensitivity = full; detectorDirty = true }
+        listenAllowed = allowed
         if (AssistantBus.state.phase == Phase.HIDDEN) mode = idleMode()
-        Notifications.refreshService(this, if (pause) "In pausa: batteria scarica" else null)
-        AssistantBus.status(statusText())
+        if (allowed) warmUp() else coolDown()
+        // alla scadenza della finestra si ricontrolla
+        (d as? ListenPolicy.Decision.Listen)?.until?.let { main.postDelayed(policyTimer, (it - now).coerceAtLeast(0) + 50) }
+
+        val text = statusText()
+        if (text != lastStatus) {
+            lastStatus = text
+            AssistantBus.status(text)
+            Notifications.refreshService(this, text)
+        }
+    }
+
+    private fun statusText(): String = when {
+        !Prefs.voiceWake(this) -> "Pronto (tasto o gesto)"
+        else -> when (val d = decision) {
+            is ListenPolicy.Decision.Listen -> "In ascolto · ${d.reason.label}"
+            is ListenPolicy.Decision.Silent -> when (d.why) {
+                ListenPolicy.Off.HEAT -> "Sospeso: telefono caldo"
+                ListenPolicy.Off.BATTERY -> "Sospeso: batteria al $batteryLevel%"
+                ListenPolicy.Off.NONE -> "Microfono spento · in attesa"
+            }
+        }
     }
 
     private fun startEngine() {
@@ -293,14 +461,15 @@ class WakeService : Service(), AssistantBus.Controller {
         voskNeeded = Prefs.voiceWake(this)
         AssistantBus.controller = this
 
+        // tiene sveglio il processore solo mentre il microfono è aperto (vedi audioLoop)
         wakeLock = getSystemService(PowerManager::class.java)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "assistente:ascolto")
-            .apply { setReferenceCounted(false); acquire() }
+            .apply { setReferenceCounted(false) }
 
         initTts()
         refreshContacts()
-        registerReceiver(batteryReceiver, android.content.IntentFilter(Intent.ACTION_BATTERY_CHANGED))?.let { onBattery(it) }
-        mode = idleMode()
+        registerContext()
+        updatePolicy()
 
         audioThread = Thread({ runEngine() }, "assistente-audio").apply { start() }
     }
@@ -308,16 +477,19 @@ class WakeService : Service(), AssistantBus.Controller {
     override fun onDestroy() {
         val wasListening = alive && !failed
         alive = false
+        synchronized(modeLock) { modeLock.notifyAll() }
         running = false
         main.removeCallbacksAndMessages(null)
         destroySystemRecognizer()
+        coolDown()
+        closeStream()
         releaseAudioFocus()
-        try { unregisterReceiver(batteryReceiver) } catch (_: Exception) { }
+        unregisterContext()
         overlay.remove()
         audioThread?.join(800)
         tts?.shutdown()
         feedback.release()
-        wakeLock?.release()
+        if (wakeLock?.isHeld == true) wakeLock?.release()
         if (AssistantBus.controller === this) AssistantBus.controller = null
         Notifications.cancelWake(this)
         AssistantBus.hide()
@@ -483,9 +655,13 @@ class WakeService : Service(), AssistantBus.Controller {
         while (alive) {
             if (mode == Mode.EXTERNAL || mode == Mode.IDLE) {
                 micReleased = true
-                SystemClock.sleep(50)
+                held.clear()
+                // microfono chiuso: il processore può dormire, il thread aspetta il prossimo cambio di modo
+                if (wakeLock?.isHeld == true) wakeLock?.release()
+                synchronized(modeLock) { if (mode == Mode.EXTERNAL || mode == Mode.IDLE) modeLock.wait(if (mode == Mode.IDLE) 5000 else 50) }
                 continue
             }
+            wakeLock?.acquire(60 * 60 * 1000L)
             val (rec, agc) = openMic()
             micReleased = false
             try {
@@ -529,12 +705,13 @@ class WakeService : Service(), AssistantBus.Controller {
             }
             if (detectorDirty) {
                 detectorDirty = false
-                detector = Prefs.voiceDetector(this)?.let { VoiceDetector(it, RATE_HZ) }
+                // nelle finestre a schermo acceso nessun filtro: non deve perdere nemmeno un «Ok Alfio» detto piano
+                detector = if (fullSensitivity) null else Prefs.voiceDetector(this)?.let { VoiceDetector(it, RATE_HZ) }
                 voiceActive = false
             }
             val wake = wakeRec ?: return
             // in attesa e nel silenzio: blocchi da 400 ms; altrimenti da 100 ms per reagire subito
-            val idle = mode == Mode.WAKE && detector != null && !voiceActive
+            val idle = mode == Mode.WAKE && detector != null && !voiceActive && verifyAt == 0L
             val n = rec.read(buf, 0, if (idle) IDLE_READ_SAMPLES else RATE_HZ / 10)
             if (n <= 0) { SystemClock.sleep(200); continue }
             val now = SystemClock.elapsedRealtime()
@@ -548,11 +725,33 @@ class WakeService : Service(), AssistantBus.Controller {
                 listenStart = now
                 lastPartial = ""
             }
-            // non ascoltare il nostro stesso segnale acustico
-            if (now < muteUntil) continue
+            // non ascoltare il nostro stesso segnale acustico (in diretta al riconoscitore va silenzio)
+            if (now < muteUntil) {
+                if (mode == Mode.STREAM || mode == Mode.HOLD) java.util.Arrays.fill(buf, 0, n, 0.toShort()) else continue
+            }
 
             when (mode) {
                 Mode.PAUSED, Mode.EXTERNAL, Mode.IDLE -> Unit
+
+                // frase appena riconosciuta: si continua a registrare finché il riconoscitore non è pronto
+                Mode.HOLD -> {
+                    held.add(buf.copyOf(n))
+                    AssistantBus.level = levelOf(buf, n)
+                }
+
+                // frase unica: il nostro audio va in diretta al riconoscitore di sistema
+                Mode.STREAM -> {
+                    AssistantBus.level = levelOf(buf, n)
+                    val out = streamOut
+                    if (out == null) { held.add(buf.copyOf(n)); continue }
+                    try {
+                        while (true) { val h = held.poll() ?: break; out.write(toBytes(h, h.size)) }
+                        out.write(toBytes(buf, n))
+                    } catch (e: java.io.IOException) {
+                        // il riconoscitore ha finito e ha chiuso il canale
+                        if (mode == Mode.STREAM) mode = Mode.PAUSED
+                    }
+                }
 
                 Mode.WAKE -> {
                     ring.write(buf, n)
@@ -576,14 +775,19 @@ class WakeService : Service(), AssistantBus.Controller {
 
                     // 2° livello: lo stesso audio riascoltato con tutto il vocabolario
                     if (verifyAt != 0L && now >= verifyAt) {
+                        // riconosciuta mentre stavi ancora parlando: forse il comando è già iniziato
+                        val stillTalking = voiceActive || detector == null
                         verifyAt = 0L
                         wake.reset()
                         val texts = verify(cmd)
                         if (texts.any { WakeMatcher.matches(wakePhrase, it) }) {
+                            // frase unica: si tiene l'ultimo tratto (coda di «Ok Alfio» + inizio del comando)
+                            held.clear()
+                            if (stillTalking) ring.forEachChunk(RATE_HZ / 10, RATE_HZ * 12 / 10) { c, l -> held.add(c.copyOf(l)) }
                             ring.clear()
                             AssistantBus.heard(wakePhrase)
-                            mode = Mode.PAUSED
-                            main.post { onWake() }
+                            mode = Mode.HOLD
+                            main.post { onWake(voice = true) }
                         } else {
                             val what = texts.firstOrNull() ?: "nulla"
                             AssistantBus.heard("$what → non è «$wakePhrase», ignoro")
@@ -622,6 +826,13 @@ class WakeService : Service(), AssistantBus.Controller {
                 }
             }
         }
+    }
+
+    /** PCM 16 bit little endian, come lo vuole il riconoscitore. */
+    private fun toBytes(buf: ShortArray, n: Int): ByteArray {
+        val out = ByteArray(n * 2)
+        for (i in 0 until n) { val v = buf[i].toInt(); out[2 * i] = v.toByte(); out[2 * i + 1] = (v shr 8).toByte() }
+        return out
     }
 
     /** Volume del blocco audio, 0..1 (circa 40 dB = silenzio, 75 dB = voce forte). */
@@ -683,6 +894,16 @@ class WakeService : Service(), AssistantBus.Controller {
 
     private fun listenWith(asr: Asr, seq: Int) {
         if (!alive || seq != listenSeq) return
+        // frase unica: il microfono è già aperto, il nostro audio va direttamente al riconoscitore
+        if (asr != Asr.VOSK && fromVoice && mode == Mode.HOLD && Build.VERSION.SDK_INT >= 33 && !Prefs.streamUnsupported(this)) {
+            fromVoice = false
+            val busy = beep()
+            muteUntil = SystemClock.elapsedRealtime() + busy + 40
+            startSystemRecognizer(asr, seq, stream = true)
+            return
+        }
+        fromVoice = false
+        held.clear()
         if (asr == Asr.VOSK) {
             voskNeeded = true
             val busy = beep()
@@ -709,19 +930,38 @@ class WakeService : Service(), AssistantBus.Controller {
         main.post(waitMic)
     }
 
-    private fun startSystemRecognizer(asr: Asr, seq: Int) {
+    private fun createRecognizer(asr: Asr): SpeechRecognizer? = try {
+        if (asr == Asr.ON_DEVICE && Build.VERSION.SDK_INT >= 31) SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
+        else Recognizers.google(this)?.let { SpeechRecognizer.createSpeechRecognizer(this, it) }
+    } catch (e: Exception) {
+        Log.w(TAG, "Riconoscitore di sistema non creato", e)
+        null
+    }
+
+    /** Riconoscitore preparato in anticipo mentre si aspetta «Ok Alfio»: dopo la frase parte subito. */
+    private fun warmUp() {
+        if (warm != null || !Prefs.systemAsr(this)) return
+        val asr = chooseAsr()
+        if (asr == Asr.VOSK) return
+        createRecognizer(asr)?.let { warm = asr to it }
+    }
+
+    private fun coolDown() {
+        warm?.second?.let { try { it.destroy() } catch (_: Exception) { } }
+        warm = null
+    }
+
+    private fun startSystemRecognizer(asr: Asr, seq: Int, stream: Boolean = false) {
         if (!alive || seq != listenSeq) return
         destroySystemRecognizer()
-        val sr = try {
-            if (asr == Asr.ON_DEVICE && Build.VERSION.SDK_INT >= 31) SpeechRecognizer.createOnDeviceSpeechRecognizer(this)
-            else Recognizers.google(this)?.let { SpeechRecognizer.createSpeechRecognizer(this, it) }
-        } catch (e: Exception) {
-            Log.w(TAG, "Riconoscitore di sistema non creato", e)
-            null
-        }
-        if (sr == null) { degrade(asr, persist = true, seq); return }
+        val ready = warm?.takeIf { it.first == asr }?.second
+        if (ready != null) warm = null
+        val sr = ready ?: createRecognizer(asr)
+        if (sr == null) { endStream(); degrade(asr, persist = true, seq); return }
         systemRecognizer = sr
         val usedBiasing = biasingOk && Build.VERSION.SDK_INT >= 33
+        streaming = stream
+        streamStartedAt = SystemClock.elapsedRealtime()
 
         sr.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {}
@@ -742,17 +982,36 @@ class WakeService : Service(), AssistantBus.Controller {
 
             override fun onResults(results: Bundle?) {
                 if (seq != listenSeq) return
+                val wasStreaming = streaming
                 val texts = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     .orEmpty().map { it.trim() }.filter { it.isNotEmpty() }.distinct()
+                    .map { if (wasStreaming) WakeMatcher.stripLeading(wakePhrase, it) else it }
                 destroySystemRecognizer()
+                endStream()
                 mode = Mode.PAUSED
-                if (texts.isEmpty()) onSilence() else onFinal(texts, asr)
+                when {
+                    texts.any { it.isNotBlank() } -> onFinal(texts.filter { it.isNotBlank() }, asr)
+                    // hai detto solo «Ok Alfio» e ti sei fermato: si riascolta il comando
+                    wasStreaming && results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty().isNotEmpty() ->
+                        { listenSeq++; listenWith(asr, listenSeq) }
+                    else -> onSilence()
+                }
             }
 
             override fun onError(error: Int) {
                 if (seq != listenSeq) return
+                val wasStreaming = streaming
                 destroySystemRecognizer()
-                Log.i(TAG, "Riconoscitore ${asr.name}: errore $error")
+                endStream()
+                Log.i(TAG, "Riconoscitore ${asr.name}: errore $error${if (wasStreaming) " (frase unica)" else ""}")
+                // il riconoscitore non accetta il nostro audio: si torna al metodo classico, per sempre
+                if (wasStreaming && error !in setOf(SpeechRecognizer.ERROR_SPEECH_TIMEOUT, SpeechRecognizer.ERROR_NO_MATCH) &&
+                    SystemClock.elapsedRealtime() - streamStartedAt < 3000 && transcript.isBlank()
+                ) {
+                    Prefs.setStreamUnsupported(this@WakeService, true)
+                    listenWith(asr, seq)
+                    return
+                }
                 when (error) {
                     SpeechRecognizer.ERROR_SPEECH_TIMEOUT, SpeechRecognizer.ERROR_NO_MATCH -> {
                         mode = Mode.PAUSED
@@ -782,17 +1041,33 @@ class WakeService : Service(), AssistantBus.Controller {
             putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, packageName)
             if (usedBiasing) putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, biasingStrings())
         }
+        var readEnd: android.os.ParcelFileDescriptor? = null
+        if (stream && Build.VERSION.SDK_INT >= 33) {
+            val pipe = android.os.ParcelFileDescriptor.createPipe()
+            readEnd = pipe[0]
+            intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, pipe[0])
+            intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
+            intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
+            intent.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, RATE_HZ)
+            streamOut = android.os.ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])
+            mode = Mode.STREAM
+        }
         try {
             sr.startListening(intent)
         } catch (e: Exception) {
             Log.w(TAG, "startListening", e)
             destroySystemRecognizer()
+            endStream()
             degrade(asr, persist = true, seq)
             return
+        } finally {
+            // il riconoscitore ha ricevuto la sua copia del canale
+            try { readEnd?.close() } catch (_: Exception) { }
         }
         main.postDelayed({
             if (seq == listenSeq && systemRecognizer === sr) {
                 destroySystemRecognizer()
+                endStream()
                 degrade(asr, persist = false, seq)
             }
         }, SYSTEM_ASR_WATCHDOG_MS)
@@ -804,6 +1079,20 @@ class WakeService : Service(), AssistantBus.Controller {
         if (persist && next.ordinal > asrLevel.ordinal) asrLevel = next
         val actual = if (next == Asr.SYSTEM && Recognizers.google(this) == null) Asr.VOSK else next
         listenWith(actual, seq)
+    }
+
+    /** Chiude il canale audio verso il riconoscitore (il thread audio smette di scrivere). */
+    private fun endStream() {
+        streaming = false
+        if (mode == Mode.STREAM || mode == Mode.HOLD) mode = Mode.PAUSED
+        closeStream()
+    }
+
+    private fun closeStream() {
+        val out = streamOut
+        streamOut = null
+        held.clear()
+        try { out?.close() } catch (_: Exception) { }
     }
 
     private fun destroySystemRecognizer() {
@@ -828,8 +1117,9 @@ class WakeService : Service(), AssistantBus.Controller {
     /** Vero solo mentre aspettiamo che l'utente parli: scarta eventi audio arrivati in ritardo. */
     private fun listening() = alive && AssistantBus.state.phase == Phase.LISTENING
 
-    private fun onWake() {
+    private fun onWake(voice: Boolean = false) {
         if (!alive) return
+        fromVoice = voice
         main.removeCallbacks(hideRunnable)
         cancelPendingCall()
         pending = Pending.Fresh
@@ -848,8 +1138,9 @@ class WakeService : Service(), AssistantBus.Controller {
         listen("Ti ascolto…", emptyList())
     }
 
-    private fun onPartial(text: String) {
+    private fun onPartial(raw: String) {
         if (!listening()) return
+        val text = if (streaming) WakeMatcher.stripLeading(wakePhrase, raw) else raw
         transcript = text
         AssistantBus.post(AssistantBus.state.copy(transcript = text))
     }
@@ -1325,6 +1616,8 @@ class WakeService : Service(), AssistantBus.Controller {
 
     private fun hide() {
         AssistantBus.level = 0f
+        // finito il dialogo si ricontrolla se il microfono deve restare aperto
+        main.post { updatePolicy() }
         releaseAudioFocus()
         actionSeq++
         main.removeCallbacks(hideRunnable)
@@ -1349,6 +1642,7 @@ class WakeService : Service(), AssistantBus.Controller {
     private fun backToWake() {
         listenSeq++
         destroySystemRecognizer()
+        endStream()
         pending = Pending.Fresh
         resetRequested = true
         mode = idleMode()
@@ -1389,6 +1683,7 @@ class WakeService : Service(), AssistantBus.Controller {
         val p = pending
         listenSeq++
         destroySystemRecognizer()
+        endStream()
         mode = Mode.PAUSED
         afterSpeech = null
         tts?.stop()
