@@ -285,6 +285,23 @@ class LogicTest {
             d(s, st(now = 100_000, screenOn = true, screenSince = 99_000, inCar = true)))
         // sempre
         assertEquals(ListenPolicy.Decision.Listen(ListenPolicy.Reason.ALWAYS, null), d(s.copy(always = true), st()))
+
+        // dopo il blocco: uso il telefono 5 minuti (finestra dello sblocco scaduta), blocco a 400 s
+        fun locked(now: Long, off: Long = 400_000) = ListenPolicy.State(now, false, 90_000, false, 0, false, false, 80, screenOffSince = off)
+        val after15 = s.copy(afterLockSec = 15)
+        assertEquals(silent, d(s, locked(405_000)))                    // opzione «no»: spento
+        assertEquals(ListenPolicy.Decision.Listen(ListenPolicy.Reason.AFTER_LOCK, 415_000), d(after15, locked(405_000)))
+        assertEquals(silent, d(after15, locked(416_000)))              // 15 s scaduti
+        assertEquals(ListenPolicy.Decision.Listen(ListenPolicy.Reason.AFTER_LOCK, 460_000), d(s.copy(afterLockSec = 60), locked(430_000)))
+        assertEquals(ListenPolicy.Decision.Listen(ListenPolicy.Reason.AFTER_LOCK, null), d(s.copy(afterLockSec = -1), locked(9_000_000)))
+        // schermo riacceso: vale di nuovo la finestra dello sblocco, non quella del blocco
+        assertEquals(ListenPolicy.Decision.Listen(ListenPolicy.Reason.SCREEN, 440_000),
+            d(after15, ListenPolicy.State(410_000, true, 410_000, false, 0, false, false, 80, screenOffSince = 400_000)))
+        // servizio avviato a schermo spento (spegnimento non visto): niente finestra
+        assertEquals(silent, d(after15, locked(5_000, off = 0)))
+        // le protezioni valgono anche qui
+        assertEquals(ListenPolicy.Decision.Silent(ListenPolicy.Off.HEAT),
+            d(after15, locked(405_000).copy(hot = true)))
     }
 
     @Test fun navigazione() {

@@ -612,6 +612,15 @@ class PlacesSection(a: SectionActivity) : Section(a) {
         home.inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_POSTAL_ADDRESS
         work.inputType = home.inputType
         f.note("Così basta dire «portami a casa» o «portami al lavoro». Si salvano da soli.")
+
+        f.header("A telefono bloccato")
+        val lock = f.card()
+        f.switchRow(lock, "Avvia senza sbloccare", "La navigazione parte subito, senza chiederti il PIN o l'impronta",
+            Prefs.navNoUnlock(a)) { Prefs.setNavNoUnlock(a, it) }
+        f.note("Google Maps di solito mostra la guida sopra la schermata di blocco; per toccare la mappa serve comunque sbloccare. " +
+            "Se Maps resta nascosto dietro il blocco, spegni questa opzione.\n\n" +
+            "Per non dover sbloccare in auto: Impostazioni del telefono → Schermata di blocco → Smart Lock → " +
+            "Dispositivi attendibili → aggiungi il Bluetooth dell'auto.")
     }
 
     override fun pause() = Prefs.setPlaces(a, home.text.toString(), work.text.toString())
@@ -645,8 +654,11 @@ class EnergySection(a: SectionActivity) : Section(a) {
     private lateinit var vadInfo: Row
     private lateinit var windowSpinner: Spinner
     private lateinit var carSpinner: Spinner
+    private lateinit var lockSpinner: Spinner
+    private lateinit var lockNote: TextView
     private lateinit var threshold: Spinner
     private val windows = listOf(15 to "per 15 secondi", 30 to "per 30 secondi", 60 to "per 1 minuto", -1 to "finché resta acceso")
+    private val lockWindows = listOf(0 to "no", 15 to "per 15 secondi", 30 to "per 30 secondi", 60 to "per 1 minuto", -1 to "sempre (consumo alto)")
     private val carDurations = listOf(-1 to "per tutto il viaggio", 10 to "per i primi 10 minuti", 20 to "per i primi 20 minuti", 30 to "per i primi 30 minuti")
     private val thresholds = listOf(10, 15, 20, 25, 30)
 
@@ -664,6 +676,10 @@ class EnergySection(a: SectionActivity) : Section(a) {
         windowSpinner = f.spinnerRow(when_, "Per quanto", windows.map { it.second },
             windows.indexOfFirst { it.first == Prefs.screenWindow(a) }.coerceAtLeast(1)) { i ->
             Prefs.setScreenWindow(a, windows[i].first); changed()
+        }.second
+        lockSpinner = f.spinnerRow(when_, "Dopo aver bloccato lo schermo", lockWindows.map { it.second },
+            lockWindows.indexOfFirst { it.first == Prefs.afterLock(a) }.coerceAtLeast(0)) { i ->
+            Prefs.setAfterLock(a, lockWindows[i].first); changed()
         }.second
         f.switchRow(when_, "In auto", "Con Android Auto o il Bluetooth dell'auto collegato", Prefs.listenCar(a)) { on ->
             Prefs.setListen(a, "listen_car", on)
@@ -683,6 +699,7 @@ class EnergySection(a: SectionActivity) : Section(a) {
         f.switchRow(when_, "Sempre", "Microfono sempre aperto: consumo alto", Prefs.listenAlways(a)) {
             Prefs.setListen(a, "listen_always", it); changed()
         }
+        lockNote = f.note("")
         f.note("Negli altri momenti il microfono è spento e non consuma: tieni premuto il tasto di accensione.")
 
         f.header("Protezioni")
@@ -715,6 +732,11 @@ class EnergySection(a: SectionActivity) : Section(a) {
             "in Attivazione scegli «Entrambi» per avere anche il tasto di accensione."
         windowSpinner.isEnabled = Prefs.listenScreen(a)
         carSpinner.isEnabled = Prefs.listenCar(a)
+        val afterLock = Prefs.afterLock(a)
+        lockNote.visibility = if (afterLock != 0) View.VISIBLE else View.GONE
+        lockNote.text = if (afterLock < 0)
+            "⚠️ «Sempre» dopo il blocco tiene il microfono acceso per tutto il tempo a schermo spento: è la situazione che consuma di più."
+        else "Quando blocchi lo schermo (o si spegne da solo) il microfono resta acceso per altri $afterLock secondi, poi si spegne."
         threshold.isEnabled = Prefs.batteryPause(a)
         vadInfo.set(if (Prefs.vad(a) == Prefs.Vad.OFF) "Il riconoscitore analizza tutto l'audio: consuma di più."
         else "Durante i viaggi e in carica il riconoscitore si accende solo quando qualcuno parla. " +

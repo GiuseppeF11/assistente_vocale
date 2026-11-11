@@ -11,6 +11,8 @@ object ListenPolicy {
         val screen: Boolean = true,
         /** per quanti secondi dopo l'accensione; -1 = finché lo schermo resta acceso */
         val screenWindowSec: Int = 30,
+        /** per quanti secondi dopo lo spegnimento/blocco dello schermo; 0 = no, -1 = finché resta spento */
+        val afterLockSec: Int = 0,
         val car: Boolean = true,
         /** per quanti minuti dal collegamento all'auto; -1 = per tutto il viaggio */
         val carMinutes: Int = -1,
@@ -36,10 +38,12 @@ object ListenPolicy {
         val hot: Boolean,
         /** percentuale, -1 se non nota */
         val battery: Int,
+        /** quando lo schermo si è spento l'ultima volta (0 = mai da quando il servizio è attivo) */
+        val screenOffSince: Long = 0,
     )
 
     enum class Reason(val label: String) {
-        SCREEN("schermo acceso"), CAR("in auto"), CHARGING("in carica"), ALWAYS("sempre")
+        SCREEN("schermo acceso"), AFTER_LOCK("schermo appena bloccato"), CAR("in auto"), CHARGING("in carica"), ALWAYS("sempre")
     }
 
     enum class Off(val label: String) {
@@ -71,6 +75,14 @@ object ListenPolicy {
             else {
                 val end = st.screenSince + s.screenWindowSec * 1000L
                 if (st.now < end) candidates += Decision.Listen(Reason.SCREEN, end)
+            }
+        }
+        // dopo il blocco: indipendente dalla finestra dello sblocco (es. 30 s allo sblocco, poi 15 s al blocco)
+        if (!st.screenOn && s.afterLockSec != 0 && st.screenOffSince > 0) {
+            if (s.afterLockSec < 0) candidates += Decision.Listen(Reason.AFTER_LOCK, null)
+            else {
+                val end = st.screenOffSince + s.afterLockSec * 1000L
+                if (st.now < end) candidates += Decision.Listen(Reason.AFTER_LOCK, end)
             }
         }
         // la condizione che dura di più: prima quelle senza scadenza, poi la scadenza più lontana

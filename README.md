@@ -131,6 +131,10 @@ Per questo «Ok Alfio» si ascolta solo nelle situazioni scelte; negli altri mom
 
 - **Allo sblocco dello schermo**: per 15 s / 30 s / 1 min / finché acceso, a ogni accensione o sblocco;
   in questa finestra niente filtro voce, sensibilità piena.
+- **Dopo aver bloccato lo schermo**: no / 15 s / 30 s / 1 min / sempre. Quando blocchi (o lo schermo si spegne
+  da solo) il microfono si riaccende per questa finestra, anche se quella dello sblocco era già scaduta:
+  utile se ti ricordi di una chiamata subito dopo aver messo via il telefono. «Sempre» = microfono acceso
+  per tutto il tempo a schermo spento (consumo alto). Spento di base.
 - **In auto** (Android Auto o autoradio Bluetooth): per tutto il viaggio o solo i primi 10/20/30 minuti.
 - **In carica**, ma non in auto (in auto valgono le regole dell'auto).
 - **Sempre** (consumo alto, spento di base).
@@ -228,9 +232,13 @@ vocabolario del modello Vosk (`graph/words.txt`).
 
 ## Limiti da conoscere
 
-- **Schermo bloccato.** Le chiamate partono senza sbloccare. La navigazione no: Android non
-  permette a Google Maps di aprirsi sopra il blocco, quindi l'assistente chiede lo sblocco
-  (impronta/PIN) e poi avvia Maps.
+- **Schermo bloccato.** Le chiamate partono senza sbloccare. Lo sblocco con PIN/impronta/volto non si
+  può aggirare da un'app. Con **Luoghi → Avvia senza sbloccare** (attivo di base) la navigazione parte
+  comunque: Google Maps di solito mostra la guida sopra il blocco e la voce parte subito; per toccare la
+  mappa serve sbloccare. Se Maps resta nascosto dietro il blocco, spegni l'opzione e l'assistente tornerà
+  a chiedere lo sblocco prima di aprirlo. Spotify chiede ancora lo sblocco solo quando serve aprire l'app.
+  Per non sbloccare mai in auto: Impostazioni → Schermata di blocco → **Smart Lock → Dispositivi
+  attendibili** → Bluetooth dell'auto.
 - **Dopo un riavvio** Android (14+) vieta di riaccendere il microfono in automatico: arriva una
   notifica, basta toccarla (o aprire l'app) e l'ascolto riparte.
 - **Microfono sempre in ascolto.** Per sentire la frase di attivazione il microfono deve restare

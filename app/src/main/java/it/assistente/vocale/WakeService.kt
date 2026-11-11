@@ -175,6 +175,7 @@ class WakeService : Service(), AssistantBus.Controller {
     private var decision: ListenPolicy.Decision = ListenPolicy.Decision.Silent(ListenPolicy.Off.NONE)
     private var screenOn = true
     private var screenSince = 0L
+    private var screenOffSince = 0L
     private var charging = false
     private var batteryLevel = -1
     private var batteryHot = false
@@ -354,7 +355,7 @@ class WakeService : Service(), AssistantBus.Controller {
                 screenOn = true; screenSince = now
                 autoConnected = CarMode.androidAutoConnected(this)
             }
-            Intent.ACTION_SCREEN_OFF -> screenOn = false
+            Intent.ACTION_SCREEN_OFF -> { screenOn = false; screenOffSince = now }
             Intent.ACTION_BATTERY_CHANGED -> readBattery(i)
             android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED, android.bluetooth.BluetoothDevice.ACTION_ACL_DISCONNECTED -> {
                 @Suppress("DEPRECATION")
@@ -401,6 +402,7 @@ class WakeService : Service(), AssistantBus.Controller {
     private fun policySettings() = ListenPolicy.Settings(
         screen = Prefs.listenScreen(this),
         screenWindowSec = Prefs.screenWindow(this),
+        afterLockSec = Prefs.afterLock(this),
         car = Prefs.listenCar(this),
         carMinutes = Prefs.carMinutes(this),
         charging = Prefs.listenCharging(this),
@@ -420,11 +422,13 @@ class WakeService : Service(), AssistantBus.Controller {
         wasInCar = inCar
         val d = ListenPolicy.decide(
             policySettings(),
-            ListenPolicy.State(now, screenOn, screenSince, inCar, carSince, charging, thermalHot || batteryHot, batteryLevel),
+            ListenPolicy.State(now, screenOn, screenSince, inCar, carSince, charging, thermalHot || batteryHot, batteryLevel, screenOffSince),
         )
         decision = d
         val allowed = d is ListenPolicy.Decision.Listen && Prefs.voiceWake(this)
-        val full = d is ListenPolicy.Decision.Listen && d.reason == ListenPolicy.Reason.SCREEN
+        // finestre brevi (sblocco, appena bloccato): sensibilità piena; ascolto lungo: filtro voce
+        val full = d is ListenPolicy.Decision.Listen && (d.reason == ListenPolicy.Reason.SCREEN ||
+            (d.reason == ListenPolicy.Reason.AFTER_LOCK && d.until != null))
         if (full != fullSensitivity) { fullSensitivity = full; detectorDirty = true }
         listenAllowed = allowed
         if (AssistantBus.state.phase == Phase.HIDDEN) mode = idleMode()
@@ -1552,8 +1556,10 @@ class WakeService : Service(), AssistantBus.Controller {
      * Bloccato: ci pensa la schermata, che chiede lo sblocco prima di aprirla.
      */
     private fun launchApp(launch: AssistantBus.Launch, message: String, failure: String) {
-        // in auto non si sblocca il telefono: Maps/Spotify si aprono comunque (finiscono sullo schermo dell'auto)
-        if (!isLocked() || carMode) {
+        // in auto non si sblocca il telefono: Maps/Spotify si aprono comunque (finiscono sullo schermo dell'auto).
+        // La navigazione può partire anche a telefono bloccato: Maps la mostra sopra il blocco e la guida vocale parte subito.
+        val noUnlock = carMode || (launch is AssistantBus.Launch.Navigate && Prefs.navNoUnlock(this))
+        if (!isLocked() || noUnlock) {
             AssistantBus.post(UiState(Phase.WORKING, message, transcript))
             backToWake()
             if (Actions.run(this, launch)) {

@@ -170,6 +170,7 @@ class MainActivity : Activity() {
         if (Prefs.listenAlways(this)) return "sempre"
         val parts = buildList {
             if (Prefs.listenScreen(this@MainActivity)) add("allo sblocco")
+            if (Prefs.afterLock(this@MainActivity) != 0) add("al blocco")
             if (Prefs.listenCar(this@MainActivity)) add("in auto")
             if (Prefs.listenCharging(this@MainActivity)) add("in carica")
         }
