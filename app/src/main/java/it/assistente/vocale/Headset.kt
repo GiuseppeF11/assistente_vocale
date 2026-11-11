@@ -67,11 +67,10 @@ class HeadsetAudio(private val c: Context) {
     @Volatile var active = false
         private set
 
-    /** Collega microfono e audio delle cuffie; [then] parte quando sono pronti (al massimo dopo 2,5 s). */
+    /** Collega microfono e audio delle cuffie; [then] parte quando sono pronti (o, se non si riesce, col telefono). */
     fun connect(then: () -> Unit) {
-        val target = headsetDevice()
-        if (target == null) {
-            // nessuna cuffia Bluetooth con microfono: si usa il telefono
+        if (btAudioDevices().isEmpty()) {
+            // nessun dispositivo Bluetooth con microfono: si usa il telefono
             report("Nessuna cuffia con microfono trovata: usato il telefono")
             then(); return
         }
@@ -79,6 +78,7 @@ class HeadsetAudio(private val c: Context) {
         active = true
         startedAt = SystemClock.elapsedRealtime()
         scoUp = false
+        routedTo = null
         if (!receiverOn) {
             try {
                 val f = android.content.IntentFilter(AudioManager.ACTION_SCO_AUDIO_STATE_UPDATED)
@@ -90,11 +90,15 @@ class HeadsetAudio(private val c: Context) {
         withProxy { p ->
             if (token != seq) return@withProxy
             proxy = p
-            device = p?.let { connected(it) }
-            // dice alle cuffie che il riconoscimento è partito e apre il canale voce
+            // le cuffie, non l'orologio o altri apparecchi che sanno fare chiamate
+            device = p?.let { pickHeadset(it) }
+            // dice alle cuffie che il riconoscimento è partito: Android sposta su di loro il canale voce
             startVoiceRecognition(p, device)
-            route(target)
-            waitReady(token, target, startedAt, then)
+            try {
+                previousMode = am.mode
+                am.mode = AudioManager.MODE_IN_COMMUNICATION
+            } catch (e: Exception) { Log.w(TAG, "Modalità audio", e) }
+            waitReady(token, then)
         }
     }
 
@@ -130,34 +134,70 @@ class HeadsetAudio(private val c: Context) {
 
     // ---------------------------------------------------------------------------------------------
 
-    /** Le cuffie collegate col microfono: classiche (SCO) o LE Audio (es. Galaxy Buds recenti). */
-    private fun headsetDevice(): AudioDeviceInfo? = try {
-        if (Build.VERSION.SDK_INT >= 31) {
-            am.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLE_HEADSET }
-                ?: am.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
-        } else {
-            am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO }
+    /** Uscite Bluetooth col microfono: classiche (SCO) o LE Audio. Possono esserci anche orologi o l'auto. */
+    private fun btAudioDevices(): List<AudioDeviceInfo> = try {
+        val all = if (Build.VERSION.SDK_INT >= 31) am.availableCommunicationDevices
+        else am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).toList()
+        all.filter { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || it.type == AudioDeviceInfo.TYPE_BLE_HEADSET }
+    } catch (e: Exception) { emptyList() }
+
+    /** Indirizzi dei dispositivi su cui sta andando la musica (le cuffie; l'orologio non riproduce musica). */
+    private fun musicAddresses(): Set<String> = try {
+        am.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+            .filter { it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP || it.type == AudioDeviceInfo.TYPE_BLE_HEADSET }
+            .map { it.address.uppercase() }.filter { it.isNotBlank() }.toSet()
+    } catch (e: Exception) { emptySet() }
+
+    private val watchWords = listOf("watch", "band", "orologio")
+
+    private fun looksLikeWatch(name: String?) = name != null && watchWords.any { name.contains(it, ignoreCase = true) }
+
+    /** Tra i dispositivi Bluetooth "vivavoce" collegati, le cuffie: audio e musica sì, orologi no. */
+    @SuppressLint("MissingPermission")
+    private fun pickHeadset(p: BluetoothHeadset): BluetoothDevice? {
+        if (!hasBtPermission()) return null
+        val music = musicAddresses()
+        val list = try { p.connectedDevices } catch (e: Exception) { return null }
+        return list.map { d ->
+            val major = try { d.bluetoothClass?.majorDeviceClass } catch (e: Exception) { null }
+            val name = try { d.name } catch (e: Exception) { null }
+            var score = 0
+            if (d.address.uppercase() in music) score += 3
+            if (major == android.bluetooth.BluetoothClass.Device.Major.AUDIO_VIDEO) score += 2
+            if (major == android.bluetooth.BluetoothClass.Device.Major.WEARABLE || looksLikeWatch(name)) score -= 10
+            d to score
+        }.filter { it.second > -5 }.maxByOrNull { it.second }?.first
+    }
+
+    /** Il canale voce da usare: quello delle cuffie scelte, o di quelle su cui va la musica; mai l'orologio. */
+    @SuppressLint("MissingPermission")
+    private fun pickTarget(elapsed: Long): AudioDeviceInfo? {
+        val list = btAudioDevices()
+        val d = device
+        if (d != null) {
+            val name = try { d.name } catch (e: Exception) { null }
+            list.firstOrNull { it.address.equals(d.address, ignoreCase = true) }?.let { return it }
+            list.firstOrNull { name != null && it.productName?.toString() == name }?.let { return it }
+            // Android sta ancora spostando il canale voce sulle cuffie: si aspetta un attimo
+            if (elapsed < 1500) return null
         }
-    } catch (e: Exception) { null }
+        val music = musicAddresses()
+        list.firstOrNull { it.address.uppercase() in music }?.let { return it }
+        return list.filterNot { looksLikeWatch(it.productName?.toString()) }
+            .sortedByDescending { it.type == AudioDeviceInfo.TYPE_BLE_HEADSET }.firstOrNull()
+    }
+
+    /** dove è stato chiesto di portare il canale voce */
+    private var routedTo: AudioDeviceInfo? = null
 
     /**
-     * Porta voce e microfono sulle cuffie. Servono tutti e tre i passi: la modalità "comunicazione" (il bip e la
-     * voce seguono le cuffie), il dispositivo di comunicazione e il vecchio "SCO acceso", che è l'unico a spostare
-     * sulle cuffie anche la registrazione del riconoscitore vocale (altrimenti ascolta col microfono del telefono).
+     * Porta voce e microfono sulle cuffie: dispositivo di comunicazione e il vecchio "SCO acceso", che è l'unico
+     * a spostare sulle cuffie anche la registrazione del riconoscitore (altrimenti ascolta col telefono).
      */
-    private var routeRefused = false
-
     private fun route(target: AudioDeviceInfo) {
-        routeRefused = false
+        routedTo = target
         try {
-            previousMode = am.mode
-            am.mode = AudioManager.MODE_IN_COMMUNICATION
-        } catch (e: Exception) { Log.w(TAG, "Modalità audio", e) }
-        try {
-            if (Build.VERSION.SDK_INT >= 31 && !am.setCommunicationDevice(target)) {
-                routeRefused = true
-                Log.w(TAG, "Cuffie: canale voce rifiutato")
-            }
+            if (Build.VERSION.SDK_INT >= 31 && !am.setCommunicationDevice(target)) Log.w(TAG, "Cuffie: canale voce rifiutato")
         } catch (e: Exception) { Log.w(TAG, "Audio cuffie", e) }
         if (target.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
             try {
@@ -172,35 +212,49 @@ class HeadsetAudio(private val c: Context) {
         Log.i(TAG, "Cuffie: " + text)
     }
 
-    /** Aspetta che il canale voce sia aperto, altrimenti le prime parole (e il bip) si perdono. */
+    private fun label(a: AudioDeviceInfo?) = a?.productName?.toString()?.takeIf { it.isNotBlank() } ?: "?"
+
+    /** Aspetta che il canale voce sulle cuffie sia aperto, altrimenti il bip e le prime parole si perdono. */
     @SuppressLint("MissingPermission")
-    private fun waitReady(token: Int, target: AudioDeviceInfo, start: Long, then: () -> Unit) {
+    private fun waitReady(token: Int, then: () -> Unit) {
         if (token != seq) return
-        val elapsed = SystemClock.elapsedRealtime() - start
-        val routed = Build.VERSION.SDK_INT < 31 || am.communicationDevice?.id == target.id
+        val elapsed = SystemClock.elapsedRealtime() - startedAt
+        val target = pickTarget(elapsed)
+        // se il canale disponibile cambia (es. passa dall'orologio alle cuffie) si segue
+        if (target != null && target.id != routedTo?.id) route(target)
+        val routed = target != null && (Build.VERSION.SDK_INT < 31 || am.communicationDevice?.id == target.id)
         val p = proxy
         val d = device
         val headsetSays = if (p != null && d != null && hasBtPermission()) {
             try { p.isAudioConnected(d) } catch (e: Exception) { false }
         } else false
-        val linkUp = when {
-            target.type != AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> elapsed >= 400 // LE Audio: nessun segnale da aspettare
-            else -> scoUp || headsetSays
+        val linkUp = target != null && when (target.type) {
+            AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> scoUp || headsetSays
+            else -> routed && elapsed >= 400 // LE Audio: nessun segnale da aspettare
         }
-        if ((routed && linkUp) || elapsed >= 3000) {
-            val kind = if (target.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) "classiche" else "LE Audio"
-            val name = target.productName?.toString()?.takeIf { it.isNotBlank() } ?: "cuffie"
-            report(when {
-                linkUp && routed -> "$name ($kind): canale voce aperto in $elapsed ms"
-                !hasBtPermission() -> "$name: canale voce non confermato · manca il permesso «Dispositivi nelle vicinanze»"
-                routeRefused -> "$name ($kind): Android ha rifiutato il canale voce"
-                else -> "$name ($kind): canale voce non aperto dopo 3 s (comunicazione=${routed}, sco=${scoUp}, cuffie=${headsetSays})"
-            })
+        if (routed && linkUp) {
+            val kind = if (target!!.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) "classiche" else "LE Audio"
+            report("${label(target)} ($kind): canale voce aperto in $elapsed ms")
             // appena aperto il canale, i primi istanti di audio spesso si perdono: un attimo di margine per il bip
-            main.postDelayed({ if (token == seq) then() }, if (linkUp) 350L else 0L)
+            main.postDelayed({ if (token == seq) then() }, 350L)
             return
         }
-        main.postDelayed({ waitReady(token, target, start, then) }, 100)
+        if (elapsed >= 3500) {
+            val names = btAudioDevices().joinToString { label(it) }.ifEmpty { "nessuno" }
+            val wanted = d?.let { try { it.name } catch (e: Exception) { null } }
+            report(when {
+                !hasBtPermission() -> "canale voce non aperto · manca il permesso «Dispositivi nelle vicinanze»"
+                target == null && wanted != null ->
+                    "$wanted: Android non ha dato il canale voce alle cuffie (disponibile: $names). " +
+                        "Prova a disattivare «Chiamate» per l'orologio nelle impostazioni Bluetooth"
+                else -> "${label(target)}: canale voce non aperto (comunicazione=$routed, sco=$scoUp, cuffie=$headsetSays; disponibili: $names)"
+            } + " · usato il telefono")
+            // meglio il telefono con bip e voce normali che un canale voce muto
+            release()
+            then()
+            return
+        }
+        main.postDelayed({ waitReady(token, then) }, 100)
     }
 
     @SuppressLint("MissingPermission")
@@ -211,10 +265,6 @@ class HeadsetAudio(private val c: Context) {
             p.startVoiceRecognition(d)
         } catch (e: Exception) { Log.w(TAG, "Riconoscimento cuffie", e) }
     }
-
-    @SuppressLint("MissingPermission")
-    private fun connected(p: BluetoothHeadset): BluetoothDevice? =
-        if (!hasBtPermission()) null else try { p.connectedDevices.firstOrNull() } catch (e: Exception) { null }
 
     private fun withProxy(cb: (BluetoothHeadset?) -> Unit) {
         proxy?.let { cb(it); return }
