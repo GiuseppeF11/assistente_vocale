@@ -232,13 +232,11 @@ vocabolario del modello Vosk (`graph/words.txt`).
 
 ## Limiti da conoscere
 
-- **Schermo bloccato.** Le chiamate partono senza sbloccare. Lo sblocco con PIN/impronta/volto non si
-  può aggirare da un'app. Con **Luoghi → Avvia senza sbloccare** (attivo di base) la navigazione parte
-  comunque: Google Maps di solito mostra la guida sopra il blocco e la voce parte subito; per toccare la
-  mappa serve sbloccare. Se Maps resta nascosto dietro il blocco, spegni l'opzione e l'assistente tornerà
-  a chiedere lo sblocco prima di aprirlo. Spotify chiede ancora lo sblocco solo quando serve aprire l'app.
-  Per non sbloccare mai in auto: Impostazioni → Schermata di blocco → **Smart Lock → Dispositivi
-  attendibili** → Bluetooth dell'auto.
+- **Schermo bloccato.** Le chiamate partono senza sbloccare. Per la navigazione l'assistente chiede lo
+  sblocco (impronta/volto/PIN) e poi avvia Maps: lo sblocco non si può aggirare da un'app, e Maps aperto
+  sotto il blocco non avvia la navigazione (provato). Con **Smart Lock** (Impostazioni → Schermata di
+  blocco → Smart Lock → Dispositivi attendibili → Bluetooth dell'auto) lo sblocco passa da solo e la
+  navigazione parte subito.
 - **Dopo un riavvio** Android (14+) vieta di riaccendere il microfono in automatico: arriva una
   notifica, basta toccarla (o aprire l'app) e l'ascolto riparte.
 - **Microfono sempre in ascolto.** Per sentire la frase di attivazione il microfono deve restare

@@ -1557,9 +1557,9 @@ class WakeService : Service(), AssistantBus.Controller {
      */
     private fun launchApp(launch: AssistantBus.Launch, message: String, failure: String) {
         // in auto non si sblocca il telefono: Maps/Spotify si aprono comunque (finiscono sullo schermo dell'auto).
-        // La navigazione può partire anche a telefono bloccato: Maps la mostra sopra il blocco e la guida vocale parte subito.
-        val noUnlock = carMode || (launch is AssistantBus.Launch.Navigate && Prefs.navNoUnlock(this))
-        if (!isLocked() || noUnlock) {
+        // Altrimenti a telefono bloccato si chiede lo sblocco: con Smart Lock attivo passa da solo, senza PIN.
+        // (Aprire Maps sotto il blocco non serve: Maps non avvia la navigazione finché non sblocchi.)
+        if (!isLocked() || carMode) {
             AssistantBus.post(UiState(Phase.WORKING, message, transcript))
             backToWake()
             if (Actions.run(this, launch)) {

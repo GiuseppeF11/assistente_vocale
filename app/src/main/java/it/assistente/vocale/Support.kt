@@ -87,9 +87,6 @@ object Prefs {
     /** secondi dopo lo spegnimento/blocco dello schermo; 0 = no, -1 = finché resta spento */
     fun afterLock(c: Context) = sp(c).getInt("after_lock", 0)
     fun setAfterLock(c: Context, v: Int) = sp(c).edit().putInt("after_lock", v).apply()
-    /** a telefono bloccato la navigazione parte senza chiedere lo sblocco */
-    fun navNoUnlock(c: Context) = sp(c).getBoolean("nav_no_unlock", true)
-    fun setNavNoUnlock(c: Context, v: Boolean) = sp(c).edit().putBoolean("nav_no_unlock", v).apply()
     fun setCarMinutes(c: Context, v: Int) = sp(c).edit().putInt("car_minutes", v).apply()
     /** il riconoscitore di sistema non accetta il nostro audio (frase unica): metodo classico */
     fun streamUnsupported(c: Context) = sp(c).getBoolean("stream_unsupported", false)

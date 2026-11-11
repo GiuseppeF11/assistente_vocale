@@ -614,13 +614,9 @@ class PlacesSection(a: SectionActivity) : Section(a) {
         f.note("Così basta dire «portami a casa» o «portami al lavoro». Si salvano da soli.")
 
         f.header("A telefono bloccato")
-        val lock = f.card()
-        f.switchRow(lock, "Avvia senza sbloccare", "La navigazione parte subito, senza chiederti il PIN o l'impronta",
-            Prefs.navNoUnlock(a)) { Prefs.setNavNoUnlock(a, it) }
-        f.note("Google Maps di solito mostra la guida sopra la schermata di blocco; per toccare la mappa serve comunque sbloccare. " +
-            "Se Maps resta nascosto dietro il blocco, spegni questa opzione.\n\n" +
+        f.note("Per navigare l'assistente chiede lo sblocco (impronta o volto), poi la navigazione parte da sola. " +
             "Per non dover sbloccare in auto: Impostazioni del telefono → Schermata di blocco → Smart Lock → " +
-            "Dispositivi attendibili → aggiungi il Bluetooth dell'auto.")
+            "Dispositivi attendibili → aggiungi il Bluetooth dell'auto. Così la navigazione parte subito.")
     }
 
     override fun pause() = Prefs.setPlaces(a, home.text.toString(), work.text.toString())
