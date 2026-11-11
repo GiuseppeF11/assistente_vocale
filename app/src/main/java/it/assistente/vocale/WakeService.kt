@@ -285,6 +285,7 @@ class WakeService : Service(), AssistantBus.Controller {
         if (intent?.action == ACTION_HEADSET) {
             sessionUi = false
             // la musica si ferma subito; il dialogo parte quando il canale voce delle cuffie è aperto
+            val musicWasPlaying = getSystemService(AudioManager::class.java).isMusicActive
             grabAudioFocus()
             // il microfono del telefono va chiuso subito: altrimenti il riconoscitore può "agganciarsi" a quello
             // già aperto (stessa sorgente) invece di usare il microfono delle cuffie
@@ -292,7 +293,7 @@ class WakeService : Service(), AssistantBus.Controller {
             destroySystemRecognizer()
             endStream()
             mode = Mode.EXTERNAL
-            headset.connect { if (alive) onWake() }
+            headset.connect(musicWasPlaying) { if (alive) onWake() }
         }
         // NOT_STICKY: un riavvio automatico dal sistema non avrebbe comunque accesso al microfono
         return START_NOT_STICKY

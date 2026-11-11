@@ -68,7 +68,8 @@ class HeadsetAudio(private val c: Context) {
         private set
 
     /** Collega microfono e audio delle cuffie; [then] parte quando sono pronti (o, se non si riesce, col telefono). */
-    fun connect(then: () -> Unit) {
+    fun connect(musicWasPlaying: Boolean, then: () -> Unit) {
+        this.musicWasPlaying = musicWasPlaying
         if (btAudioDevices().isEmpty()) {
             // nessun dispositivo Bluetooth con microfono: si usa il telefono
             report("Nessuna cuffia con microfono trovata: usato il telefono")
@@ -187,6 +188,9 @@ class HeadsetAudio(private val c: Context) {
             .sortedByDescending { it.type == AudioDeviceInfo.TYPE_BLE_HEADSET }.firstOrNull()
     }
 
+    /** c'era musica: le cuffie devono passare dalla musica alla voce, serve più tempo prima del bip */
+    private var musicWasPlaying = false
+
     /** dove è stato chiesto di portare il canale voce */
     private var routedTo: AudioDeviceInfo? = null
 
@@ -235,11 +239,14 @@ class HeadsetAudio(private val c: Context) {
         if (routed && linkUp) {
             val kind = if (target!!.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) "classiche" else "LE Audio"
             report("${label(target)} ($kind): canale voce aperto in $elapsed ms")
-            // appena aperto il canale, i primi istanti di audio spesso si perdono: un attimo di margine per il bip
-            main.postDelayed({ if (token == seq) then() }, 350L)
+            // appena aperto il canale, i primi istanti di audio si perdono (di più se le cuffie stavano suonando musica):
+            // un margine prima del bip
+            main.postDelayed({ if (token == seq) then() }, if (musicWasPlaying) 750L else 350L)
             return
         }
-        if (elapsed >= 3500) {
+        // il canale voce ce l'ha un altro dispositivo (es. l'orologio) e non passa alle cuffie: inutile aspettare
+        val hopeless = target == null && elapsed >= 1500
+        if (hopeless || elapsed >= 3500) {
             val names = btAudioDevices().joinToString { label(it) }.ifEmpty { "nessuno" }
             val wanted = d?.let { try { it.name } catch (e: Exception) { null } }
             report(when {
@@ -249,9 +256,10 @@ class HeadsetAudio(private val c: Context) {
                         "Prova a disattivare «Chiamate» per l'orologio nelle impostazioni Bluetooth"
                 else -> "${label(target)}: canale voce non aperto (comunicazione=$routed, sco=$scoUp, cuffie=$headsetSays; disponibili: $names)"
             } + " · usato il telefono")
-            // meglio il telefono con bip e voce normali che un canale voce muto
+            // meglio il telefono con bip e voce normali che un canale voce muto. Le cuffie riprendono a ricevere
+            // l'audio "musica" dopo una pausa: senza margine il bip arriverebbe tagliato
             release()
-            then()
+            main.postDelayed(then, 700L)
             return
         }
         main.postDelayed({ waitReady(token, then) }, 100)
