@@ -117,6 +117,13 @@ Sempre**. Se parte Bixby: Impostazioni → App → Bixby Voice → Imposta come 
 impostazioni predefinite. Serve il permesso «Dispositivi nelle vicinanze». I clic multipli (2-3 tocchi)
 restano comandi musicali per Spotify: un'app non può intercettarli senza rubarli al lettore.
 
+Android dà il canale voce a **un solo** dispositivo Bluetooth alla volta. Con più apparecchi collegati
+(es. orologio con chiamate Bluetooth + cuffie) l'app sceglie le cuffie su cui va la musica e scarta gli
+orologi; se il canale resta all'altro dispositivo, dopo 1,5 s si ripiega sul microfono del telefono.
+In *Attivazione → Cuffie Bluetooth* la riga «Ultimo uso» dice cosa è successo (dispositivo, tipo, tempo di
+apertura o motivo del ripiego). Se resta bloccato su un altro apparecchio: dissociarlo e riassociarlo, o
+disattivarne «Chiamate» nelle impostazioni Bluetooth.
+
 ## Voce
 
 Nell'app si scelgono motore (Google, Samsung, …), voce italiana e velocità, con un pulsante di prova.
