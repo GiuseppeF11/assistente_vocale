@@ -516,37 +516,52 @@ class Feedback(private val c: Context) {
 
     private var tone: android.media.ToneGenerator? = null
     private var toneVolume = -1
+    private var toneStream = -1
     private var player: android.media.MediaPlayer? = null
     private val main = Handler(Looper.getMainLooper())
 
-    /** Suona/vibra secondo le impostazioni. Restituisce per quanti ms il suono occupa l'audio. */
-    fun play(): Int {
+    /**
+     * Suona/vibra secondo le impostazioni. Restituisce per quanti ms il suono occupa l'audio.
+     * [voiceChannel]: sulle cuffie Bluetooth il suono va sul canale voce, come la risposta dell'assistente.
+     */
+    fun play(voiceChannel: Boolean = false): Int {
         if (Prefs.feedbackVibrate(c)) vibrate()
         val volume = Prefs.feedbackVolume(c)
         if (volume <= 0) return 0
         return when (val sound = Prefs.feedbackSound(c)) {
             Sound.NONE -> 0
-            Sound.CUSTOM -> playUri(Prefs.feedbackUri(c), volume)
-            else -> playTone(sound, volume)
+            Sound.CUSTOM -> playUri(Prefs.feedbackUri(c), volume, voiceChannel)
+            else -> playTone(sound, volume, voiceChannel)
         }
     }
 
-    private fun playTone(sound: Sound, volume: Int): Int {
-        if (tone == null || toneVolume != volume) {
+    private fun playTone(sound: Sound, volume: Int, voiceChannel: Boolean): Int {
+        val stream = if (voiceChannel) AudioManager.STREAM_VOICE_CALL else AudioManager.STREAM_MUSIC
+        if (tone == null || toneVolume != volume || toneStream != stream) {
             tone?.release()
-            tone = try { android.media.ToneGenerator(AudioManager.STREAM_MUSIC, volume) } catch (e: RuntimeException) { null }
+            tone = try { android.media.ToneGenerator(stream, volume) } catch (e: RuntimeException) { null }
             toneVolume = volume
+            toneStream = stream
         }
         tone?.startTone(sound.tone, sound.durationMs)
         return sound.durationMs
     }
 
     /** Suoni di notifica del telefono: troncati a 1,2 s per non coprire la voce. */
-    private fun playUri(uri: String?, volume: Int): Int {
-        if (uri == null) return playTone(Sound.BEEP, volume)
+    private fun playUri(uri: String?, volume: Int, voiceChannel: Boolean): Int {
+        if (uri == null) return playTone(Sound.BEEP, volume, voiceChannel)
         player?.release()
-        val mp = try { android.media.MediaPlayer.create(c, Uri.parse(uri)) } catch (e: Exception) { null }
-            ?: return playTone(Sound.BEEP, volume)
+        val mp = try {
+            if (voiceChannel) android.media.MediaPlayer.create(
+                c, Uri.parse(uri), null,
+                android.media.AudioAttributes.Builder()
+                    .setUsage(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                    .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION).build(),
+                c.getSystemService(AudioManager::class.java).generateAudioSessionId(),
+            )
+            else android.media.MediaPlayer.create(c, Uri.parse(uri))
+        } catch (e: Exception) { null }
+            ?: return playTone(Sound.BEEP, volume, voiceChannel)
         val v = volume / 100f
         mp.setVolume(v, v)
         mp.setOnCompletionListener { it.release(); if (player === it) player = null }

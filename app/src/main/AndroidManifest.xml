@@ -95,6 +95,26 @@
             android:theme="@style/Theme.Assistente.Overlay"
             android:turnScreenOn="true" />
 
+        <!-- gesto assistente delle cuffie Bluetooth (e comando vocale "a mani libere" a telefono bloccato) -->
+        <activity
+            android:name=".HeadsetActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:showWhenLocked="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:turnScreenOn="true">
+            <intent-filter>
+                <action android:name="android.intent.action.VOICE_COMMAND" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.speech.action.VOICE_SEARCH_HANDS_FREE" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </activity>
+
         <!-- ritorno dal login Spotify -->
         <activity
             android:name=".SpotifyLinkActivity"

@@ -180,6 +180,8 @@ class ActivationSection(a: SectionActivity) : Section(a) {
     private lateinit var wakeCheck: TextView
     private lateinit var notifRow: Row
     private lateinit var notifCard: LinearLayout
+    private lateinit var budsRow: Row
+    private lateinit var budsButton: Button
 
     override fun build(f: Form) {
         f.header("Come si attiva")
@@ -199,6 +201,17 @@ class ActivationSection(a: SectionActivity) : Section(a) {
         assistButton = f.button(assistCard, "Imposta come assistente del telefono") {
             try { a.startActivity(Intent(Settings.ACTION_VOICE_INPUT_SETTINGS)) }
             catch (e: Exception) { a.openSafe(Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)) }
+        }
+
+        f.header("Cuffie Bluetooth")
+        val buds = f.card()
+        budsRow = f.row(buds, "Microfono delle cuffie", null)
+        f.note("Il gesto assistente delle cuffie (di solito la pressione lunga) apre questo assistente, con microfono " +
+            "e voce in cuffia. La prima volta Android chiede con quale app completare l'azione: scegli " +
+            "Assistente Vocale e poi «Sempre».\n\nSe parte Bixby: Impostazioni → App → Bixby Voice → " +
+            "Imposta come predefinita → Cancella impostazioni predefinite, poi riprova il gesto.", buds)
+        budsButton = f.button(buds, "Consenti l'accesso alle cuffie") {
+            if (Build.VERSION.SDK_INT >= 31) a.requestPermissions(arrayOf(Manifest.permission.BLUETOOTH_CONNECT), 3)
         }
 
         f.header("Frase di attivazione")
@@ -269,6 +282,10 @@ class ActivationSection(a: SectionActivity) : Section(a) {
             if (Notifications.serviceHidden(a)) "✓ Nascosta (l'ascolto continua). Tocca per riattivarla."
             else "Android la obbliga finché l'assistente ascolta. Tocca e disattiva «Ascolto in background» per nasconderla."
         )
+        val btOk = Build.VERSION.SDK_INT < 31 || a.granted(Manifest.permission.BLUETOOTH_CONNECT)
+        budsRow.set(if (btOk) "✓ Pronto: parli in cuffia, risposte e bip in cuffia"
+        else "Serve il permesso «Dispositivi nelle vicinanze» per usare bene il microfono delle cuffie")
+        budsButton.visibility = if (btOk) View.GONE else View.VISIBLE
     }
 }
 

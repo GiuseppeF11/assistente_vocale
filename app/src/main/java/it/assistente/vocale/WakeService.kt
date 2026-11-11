@@ -71,6 +71,8 @@ class WakeService : Service(), AssistantBus.Controller {
         const val ACTION_RELOAD = "it.assistente.vocale.RELOAD"
         /** chiamato con il tasto/gesto dell'assistente: si salta la frase di attivazione */
         const val ACTION_SESSION = "it.assistente.vocale.SESSION"
+        /** gesto assistente delle cuffie Bluetooth: come il tasto, ma con microfono e voce sulle cuffie */
+        const val ACTION_HEADSET = "it.assistente.vocale.HEADSET"
 
         private const val RATE_HZ = 16000
         /** nessuna parola entro questo tempo: si chiude */
@@ -99,6 +101,9 @@ class WakeService : Service(), AssistantBus.Controller {
 
         fun startSession(c: Context) =
             c.startForegroundService(Intent(c, WakeService::class.java).setAction(ACTION_SESSION))
+
+        fun startHeadset(c: Context) =
+            c.startForegroundService(Intent(c, WakeService::class.java).setAction(ACTION_HEADSET))
 
         /** Applica le impostazioni cambiate (frase di attivazione) senza fermare l'ascolto. */
         fun reload(c: Context) {
@@ -229,6 +234,8 @@ class WakeService : Service(), AssistantBus.Controller {
     private val overlay by lazy { AssistantOverlay(this) }
     /** il dialogo è mostrato dalla sessione dell'assistente di sistema (tasto/gesto) */
     private var sessionUi = false
+    /** microfono e voce sulle cuffie Bluetooth durante il dialogo */
+    private val headset by lazy { HeadsetAudio(this) }
     /** modalità auto: niente schermo, tutto a voce */
     private var carMode = false
     private var focusRequest: AudioFocusRequest? = null
@@ -274,6 +281,12 @@ class WakeService : Service(), AssistantBus.Controller {
         if (intent?.action == ACTION_SESSION) {
             sessionUi = true
             onWake()
+        }
+        if (intent?.action == ACTION_HEADSET) {
+            sessionUi = false
+            // la musica si ferma subito; il dialogo parte quando il canale voce delle cuffie è aperto
+            grabAudioFocus()
+            headset.connect { if (alive) onWake() }
         }
         // NOT_STICKY: un riavvio automatico dal sistema non avrebbe comunque accesso al microfono
         return START_NOT_STICKY
@@ -488,6 +501,7 @@ class WakeService : Service(), AssistantBus.Controller {
         coolDown()
         closeStream()
         releaseAudioFocus()
+        headset.close()
         unregisterContext()
         overlay.remove()
         audioThread?.join(800)
@@ -565,7 +579,12 @@ class WakeService : Service(), AssistantBus.Controller {
         val t = tts
         t?.setAudioAttributes(
             AudioAttributes.Builder()
-                .setUsage(if (carMode) AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE else AudioAttributes.USAGE_ASSISTANT)
+                .setUsage(when {
+                    // sulle cuffie la voce viaggia sul canale "telefonata", l'unico che usa il loro microfono
+                    headset.active -> AudioAttributes.USAGE_VOICE_COMMUNICATION
+                    carMode -> AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE
+                    else -> AudioAttributes.USAGE_ASSISTANT
+                })
                 .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                 .build()
         )
@@ -585,7 +604,7 @@ class WakeService : Service(), AssistantBus.Controller {
     }
 
     /** Segnale "ti ascolto"; restituisce i ms per cui non bisogna registrare. */
-    private fun beep(): Int = feedback.play()
+    private fun beep(): Int = feedback.play(voiceChannel = headset.active)
 
     // =============================================================================================
     // Thread audio (Vosk)
@@ -1382,7 +1401,8 @@ class WakeService : Service(), AssistantBus.Controller {
             return
         }
         // in auto l'audio va già all'impianto della macchina
-        val speaker = !carMode && (Prefs.speaker(this) || speakerRequested)
+        // dal gesto delle cuffie si parla in cuffia, salvo «in vivavoce» detto esplicitamente
+        val speaker = !carMode && ((Prefs.speaker(this) && !headset.active) || speakerRequested)
         val label = if (speaker) "$spokenLabel in vivavoce" else spokenLabel
         pending = Pending.Fresh
         mode = Mode.PAUSED
@@ -1390,6 +1410,8 @@ class WakeService : Service(), AssistantBus.Controller {
         speak("Chiamo $label")
         val r = Runnable {
             callRunnable = null
+            // la chiamata si prende da sola le cuffie: il nostro canale voce va chiuso prima
+            headset.release()
             if (Actions.call(this, number, speaker)) hide()
             else finish("Non sono riuscito ad avviare la chiamata.", error = true)
         }
@@ -1631,8 +1653,17 @@ class WakeService : Service(), AssistantBus.Controller {
         AssistantBus.hide()
         backToWake()
         sessionUi = false
+        releaseHeadsetWhenQuiet()
         // modalità tasto/gesto: finito il dialogo il servizio si chiude (niente microfono, niente notifica)
         if (!Prefs.voiceWake(this)) stopWhenQuiet()
+    }
+
+    /** Le cuffie tornano normali quando la voce ha finito (altrimenti l'ultima frase si taglia). */
+    private fun releaseHeadsetWhenQuiet() {
+        if (!headset.active) return
+        if (AssistantBus.state.phase != Phase.HIDDEN) return // è già ripartito un altro dialogo
+        if (tts?.isSpeaking == true) { main.postDelayed({ releaseHeadsetWhenQuiet() }, 300); return }
+        headset.release()
     }
 
     /** Aspetta che la voce finisca la frase prima di chiudere. */

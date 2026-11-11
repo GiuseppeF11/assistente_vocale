@@ -102,6 +102,21 @@ Impostazioni → App → App predefinite). Finché è scelta, «Ok Google» non 
 impostazioni del tasto laterale. Quando un'app è l'assistente, è anche il riconoscitore vocale
 predefinito: questa inoltra tutto a Google, così le altre app che usano la dettatura continuano a funzionare.
 
+### Cuffie Bluetooth
+
+Il gesto assistente delle cuffie (di solito la pressione lunga) manda al telefono «avvia riconoscimento
+vocale»: Android lo passa all'app scelta per i **comandi vocali**, e l'app si propone per questo
+(`VOICE_COMMAND` e `VOICE_SEARCH_HANDS_FREE`). Si apre lo stesso dialogo del tasto di accensione:
+- la musica va in pausa, si apre il canale voce delle cuffie (classiche o LE Audio) e, quando è pronto,
+  suona il bip: si parla nel microfono delle cuffie, risposte e bip arrivano in cuffia;
+- a fine dialogo (dopo l'ultima frase) le cuffie tornano normali e la musica in qualità piena;
+- le chiamate partono in cuffia (non in vivavoce, salvo «in vivavoce» detto esplicitamente).
+
+Prima volta: alla pressione Android chiede «Completa l'azione usando»: scegli **Assistente Vocale →
+Sempre**. Se parte Bixby: Impostazioni → App → Bixby Voice → Imposta come predefinita → Cancella
+impostazioni predefinite. Serve il permesso «Dispositivi nelle vicinanze». I clic multipli (2-3 tocchi)
+restano comandi musicali per Spotify: un'app non può intercettarli senza rubarli al lettore.
+
 ## Voce
 
 Nell'app si scelgono motore (Google, Samsung, …), voce italiana e velocità, con un pulsante di prova.
