@@ -393,4 +393,36 @@ class LogicTest {
         assertEquals(2, ChoiceParser.pick("il terzo", numeri))
         assertEquals(NumberKind.WORK, ChoiceParser.kind("in ufficio"))
     }
+
+    @Test fun luoghiPersonalizzati() {
+        val luoghi = listOf(
+            Places.Place("Palestra", "Via Etnea 100, Catania"),
+            Places.Place("Mamma", "Via Roma 5, Acireale"),
+            Places.Place("Casa al mare", "Lungomare 3, Aci Castello"),
+            Places.Place("La nonna", "Via Garibaldi 2"),
+            Places.Place("Bar", "Piazza Duomo"),
+            Places.Place("Senza indirizzo", ""),
+        )
+        fun dove(frase: String): String? {
+            val c = CommandParser.parse(frase) as? Command.Navigate ?: return "?"
+            return Places.match(c.destination, luoghi)?.name
+        }
+        assertEquals("Palestra", dove("portami in palestra"))
+        assertEquals("Palestra", dove("andiamo alla palestra"))
+        assertEquals("Mamma", dove("portami da mamma"))
+        assertEquals("Mamma", dove("portami a casa di mamma"))
+        assertEquals("Mamma", dove("naviga verso casa della mamma"))
+        assertEquals("Casa al mare", dove("portami a casa al mare"))
+        assertEquals("La nonna", dove("portami dalla nonna"))
+        assertEquals("Bar", dove("portami al bar"))
+        // errori di riconoscimento leggeri
+        assertEquals("Palestra", dove("portami in palestre"))
+        // nessun luogo: si cerca su Maps
+        assertEquals(null, dove("portami a bari"))
+        assertEquals(null, dove("portami a catania"))
+        assertEquals(null, dove("portami in via etnea 100"))
+        assertEquals(null, dove("portami da senza indirizzo"))
+        // casa e lavoro restano quelli di sempre (gestiti prima)
+        assertEquals(null, Places.match("casa", luoghi))
+    }
 }

@@ -49,6 +49,7 @@ Conservane una copia: con una chiave diversa gli aggiornamenti non si installano
 | «chiama» | «Chi vuoi chiamare?» |
 | «portami a Catania» / «naviga verso via Etnea centoventi» | apre la navigazione guidata |
 | «portami a casa» / «al lavoro» | usa gli indirizzi salvati nell'app |
+| «portami in palestra» / «da mamma» / «a casa di mamma» | usa i luoghi personalizzati (Luoghi → I tuoi luoghi); se il nome non corrisponde, cerca su Maps |
 | «portami» | «Dove vuoi andare?» |
 | «metti Albachiara da Spotify» | cerca e riproduce su Spotify |
 | «metti l'album Nevermind» / «la playlist Relax» / «qualcosa dei Coldplay» | album, playlist, artista |

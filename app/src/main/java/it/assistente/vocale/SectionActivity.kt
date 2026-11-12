@@ -22,6 +22,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.Button
 import android.widget.EditText
+import it.assistente.vocale.logic.Places
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
@@ -631,6 +632,12 @@ class PlacesSection(a: SectionActivity) : Section(a) {
         work.inputType = home.inputType
         f.note("Così basta dire «portami a casa» o «portami al lavoro». Si salvano da soli.")
 
+        f.header("I tuoi luoghi")
+        list = f.card()
+        render()
+        f.note("Di' «portami in palestra», «portami da mamma», «andiamo dalla nonna»: basta il nome del luogo. " +
+            "Se il nome non corrisponde a nessun luogo, la frase viene cercata su Maps come sempre.")
+
         f.header("A telefono bloccato")
         f.note("Per navigare l'assistente chiede lo sblocco (impronta o volto), poi la navigazione parte da sola. " +
             "Per non dover sbloccare in auto: Impostazioni del telefono → Schermata di blocco → Smart Lock → " +
@@ -638,6 +645,72 @@ class PlacesSection(a: SectionActivity) : Section(a) {
     }
 
     override fun pause() = Prefs.setPlaces(a, home.text.toString(), work.text.toString())
+
+    private lateinit var list: LinearLayout
+    private val form get() = Form(a, list)
+
+    private fun render() {
+        list.removeAllViews()
+        val places = Prefs.places(a)
+        places.forEachIndexed { i, p ->
+            form.row(list, p.name, p.address.ifBlank { "Indirizzo mancante" }, "📍") { edit(i) }
+        }
+        if (places.isEmpty()) form.row(list, "Nessun luogo", "Aggiungi palestra, genitori, amici…")
+        form.button(list, "+ Aggiungi luogo") { edit(-1) }
+    }
+
+    /** Finestra per aggiungere ([index] = -1) o modificare un luogo. */
+    private fun edit(index: Int) {
+        val places = Prefs.places(a).toMutableList()
+        val old = places.getOrNull(index)
+        val pad = a.dp(20)
+        val box = LinearLayout(a).apply { orientation = LinearLayout.VERTICAL; setPadding(pad, a.dp(8), pad, 0) }
+        val name = EditText(a).apply {
+            hint = "Nome (es. Palestra, Mamma)"
+            setText(old?.name ?: "")
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+        }
+        val address = EditText(a).apply {
+            hint = "Indirizzo (es. Via Etnea 100, Catania)"
+            setText(old?.address ?: "")
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_POSTAL_ADDRESS
+        }
+        box.addView(name); box.addView(address)
+        val dialog = android.app.AlertDialog.Builder(a)
+            .setTitle(if (old == null) "Nuovo luogo" else "Modifica luogo")
+            .setView(box)
+            .setPositiveButton("Salva", null)
+            .setNegativeButton("Annulla", null)
+            .apply {
+                if (old != null) setNeutralButton("Elimina") { _, _ ->
+                    places.removeAt(index); Prefs.setCustomPlaces(a, places); render()
+                }
+            }
+            .create()
+        dialog.setOnShowListener {
+            // si controlla prima di chiudere: nome e indirizzo servono entrambi, e niente doppioni
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val n = name.text.toString().trim()
+                val ad = address.text.toString().trim()
+                val key = Places.key(n)
+                when {
+                    n.isEmpty() -> name.error = "Scrivi un nome"
+                    ad.isEmpty() -> address.error = "Scrivi l'indirizzo"
+                    key in setOf("casa", "casamia", "lavoro", "ufficio") -> name.error = "Casa e lavoro si impostano sopra"
+                    places.withIndex().any { (j, p) -> j != index && Places.key(p.name) == key } ->
+                        name.error = "Esiste già un luogo con questo nome"
+                    else -> {
+                        val p = Places.Place(n, ad)
+                        if (old == null) places.add(p) else places[index] = p
+                        Prefs.setCustomPlaces(a, places)
+                        render()
+                        dialog.dismiss()
+                    }
+                }
+            }
+        }
+        dialog.show()
+    }
 }
 
 class CarSection(a: SectionActivity) : Section(a) {

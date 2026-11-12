@@ -48,6 +48,7 @@ import it.assistente.vocale.logic.Text
 import it.assistente.vocale.logic.TimeParser
 import it.assistente.vocale.logic.MediaFocus
 import it.assistente.vocale.logic.ListenPolicy
+import it.assistente.vocale.logic.Places
 import it.assistente.vocale.logic.VoiceDetector
 import it.assistente.vocale.logic.WakeMatcher
 import org.json.JSONArray
@@ -1136,6 +1137,7 @@ class WakeService : Service(), AssistantBus.Controller {
             "chiama", "telefona", "portami", "naviga", "vivavoce", "cellulare", "casa", "lavoro", "annulla",
             "metti", "spotify", "album", "playlist", "sveglia", "svegliami", "timer", "calendario", "agenda",
         )
+        Prefs.places(this).forEach { list.add(it.name) }
         contacts.asSequence().map { it.name }.take(150).forEach { list.add(it) }
         return list
     }
@@ -1449,6 +1451,10 @@ class WakeService : Service(), AssistantBus.Controller {
                 if (destination.isEmpty()) {
                     finish("Indirizzo del lavoro non impostato. Inseriscilo nell'app.", error = true); return
                 }
+            }
+            // i luoghi salvati ("in palestra", "da mamma"); se non corrisponde nessuno si cerca su Maps
+            else -> Places.match(rawDestination, Prefs.places(this))?.let { p ->
+                destination = p.address; shown = p.name
             }
         }
         if (carMode && Prefs.carConfirm(this) && !navConfirmed) {

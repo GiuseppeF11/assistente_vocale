@@ -250,7 +250,8 @@ class MainActivity : Activity() {
             if (!CalendarStore.hasPermission(this)) "Manca il permesso" else CalendarStore.target(this)?.label ?: "Nessun calendario"
         )
         rows[SectionKey.PLACES]?.set(
-            "Casa " + (if (Prefs.home(this).isNotEmpty()) "✓" else "—") + " · Lavoro " + (if (Prefs.work(this).isNotEmpty()) "✓" else "—")
+            "Casa " + (if (Prefs.home(this).isNotEmpty()) "✓" else "—") + " · Lavoro " + (if (Prefs.work(this).isNotEmpty()) "✓" else "—") +
+                Prefs.places(this).size.let { n -> if (n == 0) "" else " · altri $n" }
         )
         rows[SectionKey.CAR]?.set(
             Prefs.carMode(this).label.substringBefore(" (") + if (CarMode.androidAutoConnected(this)) " · collegato" else ""

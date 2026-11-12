@@ -141,6 +141,21 @@ object Prefs {
     fun work(c: Context): String = sp(c).getString("work", "")!!.trim()
     fun setPlaces(c: Context, home: String, work: String) =
         sp(c).edit().putString("home", home.trim()).putString("work", work.trim()).apply()
+
+    /** luoghi personalizzati oltre a casa e lavoro, nell'ordine in cui sono stati aggiunti */
+    fun places(c: Context): List<it.assistente.vocale.logic.Places.Place> = try {
+        val arr = org.json.JSONArray(sp(c).getString("places", "[]"))
+        (0 until arr.length()).map { i ->
+            val o = arr.getJSONObject(i)
+            it.assistente.vocale.logic.Places.Place(o.optString("n"), o.optString("a"))
+        }
+    } catch (e: Exception) { emptyList() }
+
+    fun setCustomPlaces(c: Context, list: List<it.assistente.vocale.logic.Places.Place>) {
+        val arr = org.json.JSONArray()
+        list.forEach { p -> arr.put(org.json.JSONObject().put("n", p.name.trim()).put("a", p.address.trim())) }
+        sp(c).edit().putString("places", arr.toString()).apply()
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
