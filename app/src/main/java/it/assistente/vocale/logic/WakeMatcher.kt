@@ -28,6 +28,31 @@ object WakeMatcher {
     }
 
     /**
+     * Riattivazione a voce durante l'ascolto del comando: se in [heard] c'è la frase intera, restituisce quello che
+     * viene dopo la sua ultima ripetizione ("chiama ehm ok alfio chiama Luca" -> "chiama Luca", "ok alfio" -> "").
+     * null se la frase non c'è. Mantiene maiuscole e accenti.
+     */
+    fun afterLast(phrase: String, heard: String): String? {
+        val p = Text.tokens(phrase)
+        val target = p.joinToString("")
+        if (p.isEmpty() || target.length < 4) return null
+        val words = heard.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        val norm = words.map { Text.normalize(it).replace(" ", "") }
+        val threshold = if (target.length < 6) 0.85 else 0.75
+        var end = -1
+        for (start in words.indices) {
+            for (len in 1..minOf(p.size + 1, words.size - start)) {
+                val candidate = norm.subList(start, start + len).joinToString("")
+                // la frase intera, non un pezzo: "alfio" da solo è un nome, non una riattivazione
+                if (candidate.length * 10 < target.length * 8) continue
+                if (Text.soundsLike(target, candidate) >= threshold) { end = maxOf(end, start + len); break }
+            }
+        }
+        if (end < 0) return null
+        return words.drop(end).joinToString(" ").trimStart(',', '.', ';', ':', '!', '?', ' ')
+    }
+
+    /**
      * Toglie la frase di attivazione dall'inizio del comando: con la frase unica il riconoscitore riceve
      * anche la coda di «Ok Alfio» ("alfio chiama Mario" -> "chiama Mario"). Mantiene maiuscole e accenti.
      */

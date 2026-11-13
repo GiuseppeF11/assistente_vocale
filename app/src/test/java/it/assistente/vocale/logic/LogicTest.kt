@@ -249,6 +249,23 @@ class LogicTest {
         assertEquals("metti Vasco", WakeMatcher.stripLeading("ciao assistente", "assistente metti Vasco"))
     }
 
+    @Test fun riattivazioneAVoce() {
+        // ridetta durante l'ascolto: vale quello che viene dopo
+        assertEquals("chiama Luca", WakeMatcher.afterLast("ok alfio", "chiama ehm ok alfio chiama Luca"))
+        assertEquals("chiama Luca", WakeMatcher.afterLast("ok alfio", "Ok Alfio, chiama Luca"))
+        assertEquals("portami a casa", WakeMatcher.afterLast("ok alfio", "portami al ok alfio portami a casa"))
+        assertEquals("", WakeMatcher.afterLast("ok alfio", "no aspetta ok alfio"))
+        assertEquals("metti Vasco", WakeMatcher.afterLast("ok alfio", "ok alfio ok alfio metti Vasco"))
+        // riconoscimento storpiato
+        assertEquals("chiama Luca", WakeMatcher.afterLast("ok alfio", "okalfio chiama Luca"))
+        assertEquals("chiama Luca", WakeMatcher.afterLast("ok alfio", "o calfio chiama Luca"))
+        // un contatto che si chiama come la frase non è una riattivazione
+        assertEquals(null, WakeMatcher.afterLast("ok alfio", "chiama Alfio"))
+        assertEquals(null, WakeMatcher.afterLast("ok alfio", "chiama Alfio Rossi"))
+        assertEquals(null, WakeMatcher.afterLast("ok alfio", "portami a casa"))
+        assertEquals("metti Vasco", WakeMatcher.afterLast("ehi computer", "spegni ehi computer metti Vasco"))
+    }
+
     @Test fun quandoAscoltare() {
         val s = ListenPolicy.Settings()
         fun st(now: Long = 100_000, screenOn: Boolean = false, screenSince: Long = 0, inCar: Boolean = false,

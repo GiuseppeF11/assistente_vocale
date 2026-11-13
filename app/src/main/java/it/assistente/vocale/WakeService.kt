@@ -1153,6 +1153,12 @@ class WakeService : Service(), AssistantBus.Controller {
         if (!alive) return
         fromVoice = voice
         main.removeCallbacks(hideRunnable)
+        // riattivare = ripartire da zero: la voce si zittisce e ogni azione in sospeso viene annullata
+        // (chiamata, Maps/Spotify, sveglia, evento, conferma in auto)
+        afterSpeech = null
+        try { tts?.stop() } catch (_: Exception) { }
+        actionSeq++
+        navConfirmed = false
         cancelPendingCall()
         pending = Pending.Fresh
         misunderstandings = 0
@@ -1172,7 +1178,9 @@ class WakeService : Service(), AssistantBus.Controller {
 
     private fun onPartial(raw: String) {
         if (!listening()) return
-        val text = if (streaming) WakeMatcher.stripLeading(wakePhrase, raw) else raw
+        var text = if (streaming) WakeMatcher.stripLeading(wakePhrase, raw) else raw
+        // «Ok Alfio» ridetto mentre ascolto: quello capito prima si cancella
+        if (Prefs.voiceWake(this)) WakeMatcher.afterLast(wakePhrase, text)?.let { text = it }
         transcript = text
         AssistantBus.post(AssistantBus.state.copy(transcript = text))
     }
@@ -1184,6 +1192,15 @@ class WakeService : Service(), AssistantBus.Controller {
 
     private fun onFinal(texts: List<String>, asr: Asr) {
         if (!listening()) return
+        // «Ok Alfio» ridetto mentre ascoltavo: conta solo quello che viene dopo; da solo = si ricomincia da capo
+        if (Prefs.voiceWake(this)) {
+            val after = texts.map { WakeMatcher.afterLast(wakePhrase, it) }
+            if (after.any { it != null }) {
+                val rest = after.filterNotNull().filter { it.isNotBlank() }
+                if (rest.isEmpty()) onWake() else onFinal(rest, asr)
+                return
+            }
+        }
         AssistantBus.asr("Ultimo comando capito con: ${asr.label}")
         if (texts.any { CommandParser.mentionsSpeaker(it) }) speakerRequested = true
         val text = pickAlternative(texts)

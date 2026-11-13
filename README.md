@@ -63,6 +63,7 @@ Conservane una copia: con una chiave diversa gli aggiornamenti non si installano
 | «segna in agenda il compleanno di Marco il 15 novembre» | evento di tutto il giorno |
 | «ricordami di chiamare l'idraulico tra 3 giorni» | evento (con «tra 10 minuti» è un timer) |
 | «annulla», «lascia stare» | chiude |
+| riattivare a metà (tasto, gesto, cuffie o «Ok Alfio») | riparte da zero: la voce si zittisce, chiamate/navigazione/Spotify/sveglie/conferme in sospeso si annullano. «Ok Alfio» ridetto mentre ascolta cancella il testo capito; «Ok Alfio, chiama Luca» esegue solo «chiama Luca». Mentre l'assistente parla vale solo tasto/gesto (la sua voce non deve riattivarlo) |
 
 Alle domande si risponde a voce («Rossi», «il secondo», «cellulare») oppure toccando l'opzione.
 Dopo due incomprensioni di fila, o 7 secondi di silenzio, l'assistente si chiude da solo.
