@@ -761,7 +761,7 @@ class EnergySection(a: SectionActivity) : Section(a) {
             Prefs.setListen(a, "listen_screen", it); changed()
         }
         windowSpinner = f.spinnerRow(when_, "Per quanto", windows.map { it.second },
-            windows.indexOfFirst { it.first == Prefs.screenWindow(a) }.coerceAtLeast(1)) { i ->
+            windows.indexOfFirst { it.first == Prefs.screenWindow(a) }.let { if (it < 0) 1 else it }) { i ->
             Prefs.setScreenWindow(a, windows[i].first); changed()
         }.second
         lockSpinner = f.spinnerRow(when_, "Dopo aver bloccato lo schermo", lockWindows.map { it.second },
