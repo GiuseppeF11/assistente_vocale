@@ -81,7 +81,9 @@ class WakeService : Service(), AssistantBus.Controller {
         /** durata massima di una singola frase */
         private const val MAX_UTTERANCE_MS = 15000L
         /** margine per annullare prima che parta la chiamata */
-        private const val CALL_DELAY_MS = 1800L
+        /** margine dopo la fine della frase: su cuffie e auto l'audio arriva con un po' di ritardo */
+        private const val AFTER_SPEECH_MS = 250L
+        private const val AFTER_SPEECH_BT_MS = 450L
         private const val MAX_MISUNDERSTANDINGS = 2
         /** il riconoscitore di sistema non ha risposto: si abbandona */
         private const val SYSTEM_ASR_WATCHDOG_MS = 20000L
@@ -1433,7 +1435,6 @@ class WakeService : Service(), AssistantBus.Controller {
         pending = Pending.Fresh
         mode = Mode.PAUSED
         AssistantBus.post(UiState(Phase.WORKING, "Chiamo $label…", transcript))
-        speak("Chiamo $label")
         val r = Runnable {
             callRunnable = null
             // la chiamata si prende da sola le cuffie: il nostro canale voce va chiuso prima
@@ -1442,8 +1443,12 @@ class WakeService : Service(), AssistantBus.Controller {
             else finish("Non sono riuscito ad avviare la chiamata.", error = true)
         }
         callRunnable = r
-        main.postDelayed(r, CALL_DELAY_MS)
+        // la chiamata parte solo quando la frase è finita: altrimenti il nome si taglia
+        speak("Chiamo $label") { if (callRunnable === r) main.postDelayed(r, afterSpeechMargin()) }
     }
+
+    /** Pausa tra la fine della frase e l'azione (cuffie e impianto dell'auto hanno un po' di ritardo). */
+    private fun afterSpeechMargin(): Long = if (headset.active || carMode) AFTER_SPEECH_BT_MS else AFTER_SPEECH_MS
 
     private fun cancelPendingCall() {
         callRunnable?.let { main.removeCallbacks(it) }
@@ -1479,8 +1484,17 @@ class WakeService : Service(), AssistantBus.Controller {
             return
         }
         navConfirmed = false
-        speak("Avvio la navigazione verso $shown")
-        launchApp(AssistantBus.Launch.Navigate(destination), "Navigazione verso $shown", "Nessuna app di navigazione trovata.")
+        // Maps si apre quando la frase è finita: prima il riscontro completo, poi l'azione
+        AssistantBus.post(UiState(Phase.WORKING, "Navigazione verso $shown", transcript))
+        mode = Mode.PAUSED
+        val seq = actionSeq
+        speak("Avvio la navigazione verso $shown") {
+            if (!alive || seq != actionSeq) return@speak
+            main.postDelayed({
+                if (!alive || seq != actionSeq) return@postDelayed
+                launchApp(AssistantBus.Launch.Navigate(destination), "Navigazione verso $shown", "Nessuna app di navigazione trovata.")
+            }, afterSpeechMargin())
+        }
     }
 
     // ---- calendario ----
