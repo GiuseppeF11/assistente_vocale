@@ -1638,6 +1638,8 @@ class WakeService : Service(), AssistantBus.Controller {
             return
         }
         AssistantBus.post(UiState(Phase.WORKING, message, transcript, launch = launch))
+        // il popup del tasto non c'è più (schermo spento nel frattempo): serve la nostra schermata per lo sblocco
+        if (!sessionUi) showScreen()
         backToWake()
     }
 
@@ -1759,6 +1761,15 @@ class WakeService : Service(), AssistantBus.Controller {
     }
 
     override fun done() = hide()
+
+    /** Schermo spento durante il dialogo col tasto: si continua a voce; se poi serve lo sblocco, la nostra schermata. */
+    override fun uiGone() {
+        main.post {
+            if (!sessionUi) return@post
+            sessionUi = false
+            if (AssistantBus.state.launch != null) showScreen()
+        }
+    }
 
     override fun choose(index: Int) {
         val p = pending

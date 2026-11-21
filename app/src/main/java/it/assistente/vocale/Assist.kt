@@ -45,7 +45,11 @@ class AssistSession(private val service: AssistSessionService) : VoiceInteractio
         val inflater = LayoutInflater.from(themed)
         val v = inflater.inflate(R.layout.activity_assistant, null)
         v.findViewById<View>(R.id.edge_glow).visibility = if (Prefs.glow(context) == Prefs.Glow.OFF) View.GONE else View.VISIBLE
-        window?.window?.let { w -> w.attributes = w.attributes.apply { applyBackdrop(context) } }
+        window?.window?.let { w ->
+            w.attributes = w.attributes.apply { applyBackdrop(context) }
+            // finché il popup è aperto lo schermo resta acceso (sulla schermata di blocco si spegnerebbe in pochi secondi)
+            w.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
         card = AssistantCard(v.findViewById(R.id.card), themed, inflater)
         v.findViewById<View>(R.id.backdrop).setOnClickListener { cancelDialog() }
         return v
@@ -66,8 +70,12 @@ class AssistSession(private val service: AssistSessionService) : VoiceInteractio
 
     override fun onHide() {
         AssistantBus.removeListener(listener)
-        // chiusa dall'utente (indietro, home): si chiude anche il dialogo
-        if (!handedOff && AssistantBus.state.phase != Phase.HIDDEN) cancelDialog()
+        // chiusa dall'utente (indietro, home): si chiude anche il dialogo.
+        // Se invece si è spento lo schermo (tasto di accensione, timeout) il dialogo continua a voce
+        val screenOff = !context.getSystemService(android.os.PowerManager::class.java).isInteractive
+        if (!handedOff && AssistantBus.state.phase != Phase.HIDDEN) {
+            if (screenOff) AssistantBus.controller?.uiGone() else cancelDialog()
+        }
         super.onHide()
     }
 

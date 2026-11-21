@@ -36,6 +36,8 @@ object AssistantBus {
         fun choose(index: Int)
         /** dialogo concluso dalla schermata (app aperta dopo lo sblocco): chiude senza zittire la voce */
         fun done()
+        /** il popup di sistema è sparito (schermo spento) ma il dialogo continua a voce */
+        fun uiGone() {}
     }
 
     @Volatile var state: UiState = UiState()
